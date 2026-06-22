@@ -1108,6 +1108,36 @@ function matineeCode(v) {
   return null;
 }
 
+// Time-of-day ordering within the same date: 마티네(matinee/day) before 이브닝(evening/night)
+function matineeOrder(v) {
+  const n = normalizeMatinee(v.matinee);
+  if (n === '마티네') return 0;
+  if (n === '이브닝') return 1;
+  return 0.5; // unspecified sits between, but stable
+}
+
+// Chronological comparator: by date asc, then 마티네 → 이브닝, then perfNum
+function compareVisitsChrono(a, b) {
+  const da = a.date || '0000';
+  const db = b.date || '0000';
+  if (da !== db) return da.localeCompare(db);
+  const ma = matineeOrder(a);
+  const mb = matineeOrder(b);
+  if (ma !== mb) return ma - mb;
+  return (a.perfNum || 0) - (b.perfNum || 0);
+}
+// Reverse (newest first), but within same date keep 마티네 → 이브닝? 
+// For display "desc" we want newest date first; within same date show evening first (later time first).
+function compareVisitsChronoDesc(a, b) {
+  const da = a.date || '0000';
+  const db = b.date || '0000';
+  if (da !== db) return db.localeCompare(da);
+  const ma = matineeOrder(a);
+  const mb = matineeOrder(b);
+  if (ma !== mb) return mb - ma; // evening (1) before matinee (0) when showing newest-first
+  return (b.perfNum || 0) - (a.perfNum || 0);
+}
+
 // Visit ID source classification
 function visitSource(visit) {
   if (visit.isLegacy) return 'legacy';
@@ -1310,7 +1340,7 @@ function getSceneById(id) { return state.scenes.find(s => s.id === id); }
 function getCharacterByName(name) { return state.characters.find(c => c.name === name); }
 
 function getVisitNumMap() {
-  const chronological = [...state.visits].sort((a, b) => (a.date || '0000').localeCompare(b.date || '0000'));
+  const chronological = [...state.visits].sort(compareVisitsChrono);
   const numMap = {};
   let n = 1;
   chronological.forEach(v => {
@@ -1723,7 +1753,7 @@ function populateVisitSelector() {
   // Sort by date desc
   const sorted = [...state.visits]
     .filter(v => !v.isLegacy)
-    .sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.perfNum || 0) - (a.perfNum || 0));
+    .sort(compareVisitsChronoDesc);
   const opts = ['<option value="__new__">+ 신규 회차로 기록</option>'];
   sorted.forEach(v => {
     const label = v.perfNum
@@ -1895,8 +1925,8 @@ function renderHistory() {
     });
   });
 
-  if (sort === 'desc') visits.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
-  else if (sort === 'asc') visits.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+  if (sort === 'desc') visits.sort(compareVisitsChronoDesc);
+  else if (sort === 'asc') visits.sort(compareVisitsChrono);
   else if (sort === 'count') visits.sort((a, b) => b.entries.length - a.entries.length);
 
   const numMap = getVisitNumMap();
@@ -2913,7 +2943,7 @@ function renderCastingTracker() {
 
   const chronological = [...state.visits]
     .filter(v => !v.isLegacy)
-    .sort((a, b) => (a.date || '0000').localeCompare(b.date || '0000'));
+    .sort(compareVisitsChrono);
   const numMap = {};
   let n = 1;
   chronological.forEach(v => { numMap[v.id] = n++; });
@@ -2933,9 +2963,13 @@ function renderCastingTracker() {
       const actors = splitActorString(actorStr);
       // Dedup within a single visit (rule 8/9): same actor in same role same visit = 1
       const uniqActors = [...new Set(actors)];
+      if (!characterData[char].actorDebut) characterData[char].actorDebut = {};
       uniqActors.forEach(actor => {
         characterData[char].actorCounts[actor] = (characterData[char].actorCounts[actor] || 0) + 1;
         characterData[char].timeline.push({ visitId: v.id, date: v.date, num: numMap[v.id], actor });
+        if (v.date && !characterData[char].actorDebut[actor]) {
+          characterData[char].actorDebut[actor] = { date: v.date, num: numMap[v.id] };
+        }
       });
       characterData[char].total += uniqActors.length;
       characterData[char].lastNum = Math.max(characterData[char].lastNum, numMap[v.id]);
@@ -3004,10 +3038,14 @@ function renderCastingTracker() {
       const meta = d.meta[actor] || {};
       const subName = meta.subName ? `<span class="sub-name">${escapeHtml(meta.subName)}</span>` : '';
       const statusBadge = meta.status ? `<span class="status-badge status-${meta.status.toLowerCase()}">${escapeHtml(meta.status)}</span>` : '';
+      const debut = (d.actorDebut && d.actorDebut[actor]) ? d.actorDebut[actor] : null;
+      const debutHtml = debut
+        ? `<span class="actor-debut" style="font-size: 10px; color: var(--ink-faint); font-family: var(--mono); margin-left: 6px;" title="이 배역 데뷔일">⊳ ${escapeHtml(debut.date)}${debut.num ? ` Nº${debut.num}` : ''}</span>`
+        : '';
       return `
         <div class="dist-block">
           <div class="dist-row">
-            <span class="actor-name" style="${count === 0 ? 'color: var(--ink-faint);' : ''}">${getActorDotHtml(actor)}${escapeHtml(actor)} ${subName} ${statusBadge}${!inPool ? ' <span style="font-size:10px;color:var(--blood-bright);" title="현재 풀에 없음">●</span>' : ''}</span>
+            <span class="actor-name" style="${count === 0 ? 'color: var(--ink-faint);' : ''}">${getActorDotHtml(actor)}${escapeHtml(actor)} ${subName} ${statusBadge}${debutHtml}${!inPool ? ' <span style="font-size:10px;color:var(--blood-bright);" title="현재 풀에 없음">●</span>' : ''}</span>
             <span class="actor-stat">${count > 0 ? count + ' · ' + pct + '%' : '—'}</span>
           </div>
           <div class="dist-bar"><div class="dist-bar-fill" style="transform: scaleX(${barPct/100}); background: ${barColor};"></div></div>
@@ -3059,7 +3097,7 @@ function renderBulkEditor() {
   const sel = $('#bulkVisitSelect');
   const chronological = [...state.visits]
     .filter(v => !v.isLegacy)
-    .sort((a, b) => (b.date || '0000').localeCompare(a.date || '0000'));
+    .sort(compareVisitsChronoDesc);
   const numMap = getVisitNumMap();
   sel.innerHTML = '<option value="">— 회차 선택 —</option>' + chronological.map(v => {
     const castCount = Object.keys(v.casting || {}).length;
@@ -3835,11 +3873,13 @@ function openActorModal(actor) {
   encounters.forEach(e => { if (e.scene && byType[e.scene.type]) byType[e.scene.type].push(e); });
 
   const playedChars = {};
-  state.visits.forEach(v => {
+  const charDates = {}; // char -> { debut, debutNum, latest, latestNum }
+  const numMapForDebut = getVisitNumMap();
+  // Sort visits chronologically so first dated appearance = debut
+  const visitsChrono = [...state.visits].sort(compareVisitsChrono);
+  visitsChrono.forEach(v => {
     if (!v.casting) return;
-    // For each role, split the actor string by " → " / " X " / "/" and check each split
-    // Also dedup per-visit so multi-role for same actor counts once per role but not multi-count
-    const seenInVisit = new Map(); // role → Set of actors counted
+    const seenInVisit = new Map();
     Object.entries(v.casting).forEach(([char, actorStr]) => {
       const actors = splitActorString(actorStr);
       for (const a of actors) {
@@ -3848,6 +3888,13 @@ function openActorModal(actor) {
           if (!seenInVisit.get(char).has(a)) {
             seenInVisit.get(char).add(a);
             playedChars[char] = (playedChars[char] || 0) + 1;
+            if (!v.isLegacy && v.date) {
+              if (!charDates[char]) charDates[char] = { debut: v.date, debutNum: numMapForDebut[v.id], latest: v.date, latestNum: numMapForDebut[v.id] };
+              else {
+                if (v.date < charDates[char].debut) { charDates[char].debut = v.date; charDates[char].debutNum = numMapForDebut[v.id]; }
+                if (v.date >= charDates[char].latest) { charDates[char].latest = v.date; charDates[char].latestNum = numMapForDebut[v.id]; }
+              }
+            }
           }
         }
       }
@@ -3859,7 +3906,11 @@ function openActorModal(actor) {
       <div style="font-family: var(--mono); font-size: 10px; color: var(--gold); letter-spacing: 0.24em; text-transform: uppercase; margin-bottom: 8px;">맡은 캐릭터 · Played</div>
       ${Object.entries(playedChars).sort((a,b)=>b[1]-a[1]).map(([c, n]) => {
         const metaInline = renderActorMetaInline(c, actor);
-        return `<div class="modal-history-item"><div class="who">${escapeHtml(c)} ${metaInline}</div><div class="when">${n} 회</div></div>`;
+        const d = charDates[c];
+        const debutLine = d
+          ? `<div style="font-size: 10px; color: var(--ink-faint); font-family: var(--mono); margin-top: 3px; line-height: 1.5;">🎭 데뷔 ${escapeHtml(d.debut)}${d.debutNum ? ` · Nº${d.debutNum}` : ''}${d.latest !== d.debut ? `<br>🕐 최근 ${escapeHtml(d.latest)}${d.latestNum ? ` · Nº${d.latestNum}` : ''}` : ''}</div>`
+          : `<div style="font-size: 10px; color: var(--ink-faint); font-family: var(--mono); margin-top: 3px;">날짜 정보 없음 (Legacy)</div>`;
+        return `<div class="modal-history-item"><div class="who">${escapeHtml(c)} ${metaInline}${debutLine}</div><div class="when">${n} 회</div></div>`;
       }).join('')}
     </div>
   ` : '';
@@ -3939,7 +3990,7 @@ function downloadCastingTemplate() {
   const headers = ['date', 'visit_num', 'notes', ...state.characters.map(c => c.name)];
   const chronological = [...state.visits]
     .filter(v => !v.isLegacy)
-    .sort((a, b) => (a.date || '0000').localeCompare(b.date || '0000'));
+    .sort(compareVisitsChrono);
   const numMap = getVisitNumMap();
   const rows = [headers];
 
@@ -3977,7 +4028,7 @@ function downloadEncountersTemplate() {
   const headers = ['date', 'visit_num', 'notes', 'type', 'role', 'actor'];
   const chronological = [...state.visits]
     .filter(v => !v.isLegacy)
-    .sort((a, b) => (a.date || '0000').localeCompare(b.date || '0000'));
+    .sort(compareVisitsChrono);
   const numMap = getVisitNumMap();
   const rows = [headers];
 
