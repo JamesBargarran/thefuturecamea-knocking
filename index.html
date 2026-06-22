@@ -199,6 +199,12 @@ h2.section-title { font-family: var(--serif-display); font-size: 36px; font-weig
 .status-badge { font-family: var(--mono); font-size: 8px; letter-spacing: 0.12em; padding: 1px 5px; border-radius: 2px; text-transform: uppercase; }
 .status-regular { background: rgba(184, 155, 94, 0.18); color: var(--gold); border: 1px solid var(--gold-dim); }
 .status-swing { background: rgba(139, 26, 26, 0.18); color: var(--blood-bright); border: 1px solid var(--blood); }
+.team-pink { background: rgba(219, 112, 147, 0.18); color: #e589b0; border: 1px solid #c76a92; padding: 1px 6px; border-radius: 2px; font-family: var(--mono); font-size: 8px; letter-spacing: 0.15em; text-transform: uppercase; }
+.team-blue { background: rgba(90, 140, 200, 0.18); color: #7eb0e0; border: 1px solid #5a8cc8; padding: 1px 6px; border-radius: 2px; font-family: var(--mono); font-size: 8px; letter-spacing: 0.15em; text-transform: uppercase; }
+.avail-mark { font-family: var(--mono); font-size: 8px; letter-spacing: 0.1em; color: var(--ink-faint); margin-left: 4px; }
+.avail-checkedout { color: #c9a227; }
+.avail-retired { color: var(--ink-faint); text-decoration: line-through; }
+.dist-block.is-inactive { opacity: 0.5; }
 .sub-name { font-family: var(--serif-display); font-style: italic; color: var(--ink-faint); font-size: 12px; }
 
 .timeline { margin-top: 14px; border-top: 1px dotted var(--rule); padding-top: 14px; }
@@ -1400,6 +1406,41 @@ function getActorMeta(charName, actorName) {
   return c.actorMeta[actorName] || null;
 }
 
+// Sort a character's actors for casting UI:
+// Regular (Pink→Blue→none) → Swing (by appearance count desc) → no-status → Checked Out/Retired last
+function sortActorsForCasting(charName, actors) {
+  const c = getCharacterByName(charName);
+  const meta = (c && c.actorMeta) || {};
+  const teamOrder = { 'Pink': 0, 'Blue': 1 };
+  // count appearances per actor across all visits for this character
+  const appCount = {};
+  state.visits.forEach(v => {
+    if (!v.casting || !v.casting[charName]) return;
+    splitActorString(v.casting[charName]).forEach(a => { appCount[a] = (appCount[a] || 0) + 1; });
+  });
+  function rank(m) {
+    const inactive = (m.availability === 'Checked Out' || m.availability === 'Retired');
+    if (inactive) return 100;
+    if (m.status === 'Regular') return 0;
+    if (m.status === 'Swing') return 10;
+    return 20;
+  }
+  return [...actors].sort((a, b) => {
+    const ma = meta[a] || {};
+    const mb = meta[b] || {};
+    const ra = rank(ma), rb = rank(mb);
+    if (ra !== rb) return ra - rb;
+    if (ra === 0) { // Regular: team order
+      const ta = teamOrder[ma.team] ?? 2;
+      const tb = teamOrder[mb.team] ?? 2;
+      if (ta !== tb) return ta - tb;
+    }
+    const ca = appCount[a] || 0, cb = appCount[b] || 0;
+    if (cb !== ca) return cb - ca;
+    return a.localeCompare(b);
+  });
+}
+
 function renderActorMetaInline(charName, actorName) {
   const meta = getActorMeta(charName, actorName);
   if (!meta) return '';
@@ -1715,9 +1756,12 @@ function renderCastingInputs() {
         <div class="char-name">${escapeHtml(c.name)}</div>
         <select data-char="${escapeHtml(c.name)}">
           <option value="">— 선택 —</option>
-          ${c.actors.map(a => {
-            const m = c.actorMeta && c.actorMeta[a];
-            const label = m && m.subName ? `${a} (${m.subName})` : a;
+          ${sortActorsForCasting(c.name, c.actors).map(a => {
+            const m = (c.actorMeta && c.actorMeta[a]) || {};
+            let label = m.subName ? `${a} (${m.subName})` : a;
+            if (m.team) label += ` [${m.team}]`;
+            if (m.availability === 'Checked Out') label += ' ✱CO';
+            else if (m.availability === 'Retired') label += ' ✱✱Ret';
             return `<option value="${escapeHtml(a)}" ${currentActor === a ? 'selected' : ''}>${escapeHtml(label)}</option>`;
           }).join('')}
         </select>
@@ -2493,9 +2537,12 @@ function renderNewPerfCastingInputs() {
         <div style="display: flex; gap: 4px; align-items: center; margin-bottom: 4px;">
           <select data-newperf-char="${escapeHtml(c.name)}" data-slot="${si}" style="flex: 1;">
             <option value="">— 비움 —</option>
-            ${c.actors.map(a => {
-              const m = c.actorMeta && c.actorMeta[a];
-              const label = m && m.subName ? `${a} (${m.subName})` : a;
+            ${sortActorsForCasting(c.name, c.actors).map(a => {
+              const m = (c.actorMeta && c.actorMeta[a]) || {};
+              let label = m.subName ? `${a} (${m.subName})` : a;
+              if (m.team) label += ` [${m.team}]`;
+              if (m.availability === 'Checked Out') label += ' ✱CO';
+              else if (m.availability === 'Retired') label += ' ✱✱Ret';
               return `<option value="${escapeHtml(a)}" ${a === cur ? 'selected' : ''}>${escapeHtml(label)}</option>`;
             }).join('')}
           </select>
@@ -3015,13 +3062,33 @@ function renderCastingTracker() {
     const poolSet = new Set(d.pool);
     const allActors = new Set([...Object.keys(d.actorCounts), ...d.pool]);
     // Sort: Regular first, then Swing, then no-status. Within each group, by count desc then name.
-    const statusOrder = { 'Regular': 0, 'Swing': 1 };
+    // Sort order:
+    // 1. Active Regular (by team Pink→Blue→none)
+    // 2. Active Swing (by total count desc)
+    // 3. Active no-status
+    // 4. Checked Out / Retired (last, regardless of status)
+    const teamOrder = { 'Pink': 0, 'Blue': 1 };
+    function actorSortRank(m) {
+      const avail = m.availability;
+      const inactive = (avail === 'Checked Out' || avail === 'Retired');
+      if (inactive) return 100; // always last
+      if (m.status === 'Regular') return 0;
+      if (m.status === 'Swing') return 10;
+      return 20; // no status
+    }
     const actorList = [...allActors].sort((a, b) => {
       const ma = d.meta[a] || {};
       const mb = d.meta[b] || {};
-      const sa = statusOrder[ma.status] ?? 2;
-      const sb = statusOrder[mb.status] ?? 2;
-      if (sa !== sb) return sa - sb;
+      const ra = actorSortRank(ma);
+      const rb = actorSortRank(mb);
+      if (ra !== rb) return ra - rb;
+      // Within Regular: by team (Pink, Blue, none)
+      if (ra === 0) {
+        const ta = teamOrder[ma.team] ?? 2;
+        const tb = teamOrder[mb.team] ?? 2;
+        if (ta !== tb) return ta - tb;
+      }
+      // Swing & others & inactive: by total count desc
       const ca = d.actorCounts[a] || 0;
       const cb = d.actorCounts[b] || 0;
       if (cb !== ca) return cb - ca;
@@ -3038,14 +3105,21 @@ function renderCastingTracker() {
       const meta = d.meta[actor] || {};
       const subName = meta.subName ? `<span class="sub-name">${escapeHtml(meta.subName)}</span>` : '';
       const statusBadge = meta.status ? `<span class="status-badge status-${meta.status.toLowerCase()}">${escapeHtml(meta.status)}</span>` : '';
+      const teamBadge = meta.team ? `<span class="team-${meta.team.toLowerCase()}">${escapeHtml(meta.team)}</span>` : '';
+      const availMark = (meta.availability === 'Checked Out')
+        ? `<span class="avail-mark avail-checkedout" title="체크아웃">✱ Checked Out</span>`
+        : (meta.availability === 'Retired')
+          ? `<span class="avail-mark avail-retired" title="은퇴/하차">✱✱ Retired</span>`
+          : '';
+      const isInactive = (meta.availability === 'Checked Out' || meta.availability === 'Retired');
       const debut = (d.actorDebut && d.actorDebut[actor]) ? d.actorDebut[actor] : null;
       const debutHtml = debut
         ? `<span class="actor-debut" style="font-size: 10px; color: var(--ink-faint); font-family: var(--mono); margin-left: 6px;" title="이 배역 데뷔일">⊳ ${escapeHtml(debut.date)}${debut.num ? ` Nº${debut.num}` : ''}</span>`
         : '';
       return `
-        <div class="dist-block">
+        <div class="dist-block${isInactive ? ' is-inactive' : ''}">
           <div class="dist-row">
-            <span class="actor-name" style="${count === 0 ? 'color: var(--ink-faint);' : ''}">${getActorDotHtml(actor)}${escapeHtml(actor)} ${subName} ${statusBadge}${debutHtml}${!inPool ? ' <span style="font-size:10px;color:var(--blood-bright);" title="현재 풀에 없음">●</span>' : ''}</span>
+            <span class="actor-name" style="${count === 0 ? 'color: var(--ink-faint);' : ''}">${getActorDotHtml(actor)}${escapeHtml(actor)} ${subName} ${statusBadge}${teamBadge}${availMark}${debutHtml}${!inPool ? ' <span style="font-size:10px;color:var(--blood-bright);" title="현재 풀에 없음">●</span>' : ''}</span>
             <span class="actor-stat">${count > 0 ? count + ' · ' + pct + '%' : '—'}</span>
           </div>
           <div class="dist-bar"><div class="dist-bar-fill" style="transform: scaleX(${barPct/100}); background: ${barColor};"></div></div>
@@ -3202,6 +3276,16 @@ function renderPoolEditor() {
                   <option value="" ${!m.status ? 'selected' : ''}>—</option>
                   <option value="Regular" ${m.status === 'Regular' ? 'selected' : ''}>Regular</option>
                   <option value="Swing" ${m.status === 'Swing' ? 'selected' : ''}>Swing</option>
+                </select>
+                <select data-meta-field="team" data-actor="${escapeHtml(a)}" title="팀">
+                  <option value="" ${!m.team ? 'selected' : ''}>팀 —</option>
+                  <option value="Pink" ${m.team === 'Pink' ? 'selected' : ''}>Pink</option>
+                  <option value="Blue" ${m.team === 'Blue' ? 'selected' : ''}>Blue</option>
+                </select>
+                <select data-meta-field="availability" data-actor="${escapeHtml(a)}" title="활동 상태">
+                  <option value="" ${!m.availability || m.availability === 'Active' ? 'selected' : ''}>Active</option>
+                  <option value="Checked Out" ${m.availability === 'Checked Out' ? 'selected' : ''}>Checked Out</option>
+                  <option value="Retired" ${m.availability === 'Retired' ? 'selected' : ''}>Retired</option>
                 </select>
                 <button class="pa-remove" data-action="remove" data-actor="${escapeHtml(a)}" title="풀에서 제거">×</button>
               </div>
