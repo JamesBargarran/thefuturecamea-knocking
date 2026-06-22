@@ -231,12 +231,14 @@ h2.section-title { font-family: var(--serif-display); font-size: 36px; font-weig
 .pool-card { background: var(--paper-raised); border: 1px solid var(--rule); padding: 18px 20px; }
 .pool-card .pool-char-name { font-family: var(--serif-display); font-size: 20px; font-style: italic; color: var(--ink); margin-bottom: 4px; }
 .pool-card .pool-char-meta { font-family: var(--mono); font-size: 9px; letter-spacing: 0.2em; color: var(--gold); text-transform: uppercase; margin-bottom: 12px; }
-.pool-actor-row { display: grid; grid-template-columns: 1fr auto auto auto; gap: 8px; padding: 8px 10px; background: var(--paper-deep); border: 1px solid var(--rule); margin-bottom: 6px; align-items: center; }
-.pool-actor-row .pa-name { font-size: 13px; color: var(--ink); display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.pool-actor-row .pa-name input { background: transparent; border: none; color: var(--ink); font-family: var(--serif-body); font-size: 13px; padding: 2px 4px; width: 100px; min-width: 60px; border-bottom: 1px dotted var(--rule); }
+.pool-actor-row { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; background: var(--paper-deep); border: 1px solid var(--rule); margin-bottom: 6px; }
+.pool-actor-row .pa-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+.pool-actor-row .pa-controls { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.pool-actor-row .pa-name { font-size: 13px; color: var(--ink); display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 0; }
+.pool-actor-row .pa-name input { background: transparent; border: none; color: var(--ink); font-family: var(--serif-body); font-size: 13px; padding: 2px 4px; width: 100%; max-width: 160px; border-bottom: 1px dotted var(--rule); }
 .pool-actor-row .pa-name input:focus { outline: none; border-bottom-color: var(--gold); }
-.pool-actor-row select { background: var(--paper); border: 1px solid var(--rule); color: var(--ink); font-family: var(--mono); font-size: 10px; padding: 3px 6px; }
-.pool-actor-row .pa-remove { background: none; border: none; color: var(--ink-faint); cursor: pointer; font-size: 16px; padding: 0 6px; line-height: 1; }
+.pool-actor-row select { background: var(--paper); border: 1px solid var(--rule); color: var(--ink); font-family: var(--mono); font-size: 10px; padding: 3px 6px; flex: 1; min-width: 70px; }
+.pool-actor-row .pa-remove { background: none; border: none; color: var(--ink-faint); cursor: pointer; font-size: 16px; padding: 0 6px; line-height: 1; flex: 0 0 auto; }
 .pool-actor-row .pa-remove:hover { color: var(--blood-bright); }
 
 /* ADD UI WITH MODE TOGGLE */
@@ -1419,7 +1421,7 @@ function sortActorsForCasting(charName, actors) {
     splitActorString(v.casting[charName]).forEach(a => { appCount[a] = (appCount[a] || 0) + 1; });
   });
   function rank(m) {
-    const inactive = (m.availability === 'Checked Out' || m.availability === 'Retired');
+    const inactive = (m.availability === 'Checked Out');
     if (inactive) return 100;
     if (m.status === 'Regular') return 0;
     if (m.status === 'Swing') return 10;
@@ -1761,7 +1763,6 @@ function renderCastingInputs() {
             let label = m.subName ? `${a} (${m.subName})` : a;
             if (m.team) label += ` [${m.team}]`;
             if (m.availability === 'Checked Out') label += ' ✱CO';
-            else if (m.availability === 'Retired') label += ' ✱✱Ret';
             return `<option value="${escapeHtml(a)}" ${currentActor === a ? 'selected' : ''}>${escapeHtml(label)}</option>`;
           }).join('')}
         </select>
@@ -2542,7 +2543,6 @@ function renderNewPerfCastingInputs() {
               let label = m.subName ? `${a} (${m.subName})` : a;
               if (m.team) label += ` [${m.team}]`;
               if (m.availability === 'Checked Out') label += ' ✱CO';
-              else if (m.availability === 'Retired') label += ' ✱✱Ret';
               return `<option value="${escapeHtml(a)}" ${a === cur ? 'selected' : ''}>${escapeHtml(label)}</option>`;
             }).join('')}
           </select>
@@ -3070,7 +3070,7 @@ function renderCastingTracker() {
     const teamOrder = { 'Pink': 0, 'Blue': 1 };
     function actorSortRank(m) {
       const avail = m.availability;
-      const inactive = (avail === 'Checked Out' || avail === 'Retired');
+      const inactive = (avail === 'Checked Out');
       if (inactive) return 100; // always last
       if (m.status === 'Regular') return 0;
       if (m.status === 'Swing') return 10;
@@ -3108,10 +3108,8 @@ function renderCastingTracker() {
       const teamBadge = meta.team ? `<span class="team-${meta.team.toLowerCase()}">${escapeHtml(meta.team)}</span>` : '';
       const availMark = (meta.availability === 'Checked Out')
         ? `<span class="avail-mark avail-checkedout" title="체크아웃">✱ Checked Out</span>`
-        : (meta.availability === 'Retired')
-          ? `<span class="avail-mark avail-retired" title="은퇴/하차">✱✱ Retired</span>`
-          : '';
-      const isInactive = (meta.availability === 'Checked Out' || meta.availability === 'Retired');
+        : '';
+      const isInactive = (meta.availability === 'Checked Out');
       const debut = (d.actorDebut && d.actorDebut[actor]) ? d.actorDebut[actor] : null;
       const debutHtml = debut
         ? `<span class="actor-debut" style="font-size: 10px; color: var(--ink-faint); font-family: var(--mono); margin-left: 6px;" title="이 배역 데뷔일">⊳ ${escapeHtml(debut.date)}${debut.num ? ` Nº${debut.num}` : ''}</span>`
@@ -3268,26 +3266,29 @@ function renderPoolEditor() {
             const m = meta[a] || {};
             return `
               <div class="pool-actor-row" data-actor-idx="${ai}">
-                <span class="pa-name">
-                  <span>${escapeHtml(a)}</span>
-                  <input type="text" placeholder="별명 (옵션)" value="${escapeHtml(m.subName || '')}" data-meta-field="subName" data-actor="${escapeHtml(a)}">
-                </span>
-                <select data-meta-field="status" data-actor="${escapeHtml(a)}">
-                  <option value="" ${!m.status ? 'selected' : ''}>—</option>
-                  <option value="Regular" ${m.status === 'Regular' ? 'selected' : ''}>Regular</option>
-                  <option value="Swing" ${m.status === 'Swing' ? 'selected' : ''}>Swing</option>
-                </select>
-                <select data-meta-field="team" data-actor="${escapeHtml(a)}" title="팀">
-                  <option value="" ${!m.team ? 'selected' : ''}>팀 —</option>
-                  <option value="Pink" ${m.team === 'Pink' ? 'selected' : ''}>Pink</option>
-                  <option value="Blue" ${m.team === 'Blue' ? 'selected' : ''}>Blue</option>
-                </select>
-                <select data-meta-field="availability" data-actor="${escapeHtml(a)}" title="활동 상태">
-                  <option value="" ${!m.availability || m.availability === 'Active' ? 'selected' : ''}>Active</option>
-                  <option value="Checked Out" ${m.availability === 'Checked Out' ? 'selected' : ''}>Checked Out</option>
-                  <option value="Retired" ${m.availability === 'Retired' ? 'selected' : ''}>Retired</option>
-                </select>
-                <button class="pa-remove" data-action="remove" data-actor="${escapeHtml(a)}" title="풀에서 제거">×</button>
+                <div class="pa-top">
+                  <span class="pa-name">
+                    <span>${escapeHtml(a)}</span>
+                    <input type="text" placeholder="별명 (옵션)" value="${escapeHtml(m.subName || '')}" data-meta-field="subName" data-actor="${escapeHtml(a)}">
+                  </span>
+                  <button class="pa-remove" data-action="remove" data-actor="${escapeHtml(a)}" title="풀에서 제거">×</button>
+                </div>
+                <div class="pa-controls">
+                  <select data-meta-field="status" data-actor="${escapeHtml(a)}">
+                    <option value="" ${!m.status ? 'selected' : ''}>등급 —</option>
+                    <option value="Regular" ${m.status === 'Regular' ? 'selected' : ''}>Regular</option>
+                    <option value="Swing" ${m.status === 'Swing' ? 'selected' : ''}>Swing</option>
+                  </select>
+                  <select data-meta-field="team" data-actor="${escapeHtml(a)}" title="팀">
+                    <option value="" ${!m.team ? 'selected' : ''}>팀 —</option>
+                    <option value="Pink" ${m.team === 'Pink' ? 'selected' : ''}>Pink</option>
+                    <option value="Blue" ${m.team === 'Blue' ? 'selected' : ''}>Blue</option>
+                  </select>
+                  <select data-meta-field="availability" data-actor="${escapeHtml(a)}" title="활동 상태">
+                    <option value="" ${!m.availability || m.availability === 'Active' ? 'selected' : ''}>Active</option>
+                    <option value="Checked Out" ${m.availability === 'Checked Out' ? 'selected' : ''}>Checked Out</option>
+                  </select>
+                </div>
               </div>
             `;
           }).join('')}
