@@ -628,7 +628,7 @@ body.role-guest .guest-readonly-note { display: block; }
     </div>
 
     <div class="history-controls">
-      <input type="text" id="historySearch" placeholder="배우·배역·메모 검색 — 또는 ‘너스=David’ 페어 검색" style="flex: 1; min-width: 240px;">
+      <input type="text" id="historySearch" placeholder="배우·배역·메모 검색 — 또는 ‘Fate Witch = Haley Sung’ 페어 검색" style="flex: 1; min-width: 240px;">
       <select id="historySort">
         <option value="desc">최신순</option>
         <option value="asc">오래된순</option>
@@ -2115,18 +2115,24 @@ let visitMetaEditMode = null; // for editing date/notes/matinee of a visit
 let historyPage = 0; // pagination page (0-based)
 const HISTORY_PAGE_SIZE = 50;
 
-// Pair search: parse a query like "Nurse = David, Matron = Gabriel" into [{role, actor}, ...]
+// Pair search: parse a query like "Fate Witch = Haley Sung, Matron = Gabriel" into [{role, actor}, ...]
 // Returns null if the query contains no '=' (so the caller falls back to normal OR search).
 function parsePairQuery(raw) {
-  if (!raw || raw.indexOf('=') === -1) return null;
-  const pairs = raw.split(/[,，、]/)         // split multiple pairs on comma (incl. full-width)
+  if (!raw) return null;
+  // Strip surrounding quotes/spaces the user may have typed or that got auto-inserted.
+  let q = String(raw).trim().replace(/^['"'"\s]+|['"'"\s]+$/g, '');
+  // Normalize full-width '=' and ':' to ASCII '=' so they're recognized as pair separators.
+  q = q.replace(/[＝]/g, '=').replace(/[：]/g, ':');
+  if (q.indexOf('=') === -1 && q.indexOf(':') === -1) return null;
+  const pairs = q.split(/[,，、]/)            // split multiple pairs on comma (incl. full-width)
     .map(seg => seg.trim())
     .filter(Boolean)
     .map(seg => {
-      const idx = seg.indexOf('=');
-      if (idx === -1) return null;            // a fragment without '=' invalidates nothing; skip it
-      const role = seg.slice(0, idx).trim().toLowerCase();
-      const actor = seg.slice(idx + 1).trim().toLowerCase();
+      // Accept either '=' or ':' as the role/actor delimiter.
+      const m = seg.match(/^(.*?)[=:](.*)$/);
+      if (!m) return null;
+      const role = m[1].trim().replace(/^['"'"]+|['"'"]+$/g, '').toLowerCase();
+      const actor = m[2].trim().replace(/^['"'"]+|['"'"]+$/g, '').toLowerCase();
       if (!role || !actor) return null;
       return { role, actor };
     })
@@ -2362,11 +2368,11 @@ function renderHistory() {
       `;
     }
 
-    // Header: show #N for watched/legacy, perfNum if it's a performance seed
+    // Header: unify all numbering to "#N" (both perfNum-based and numMap-based)
     let numLabel;
     if (v.isLegacy) numLabel = '⌖';
     else if (v.perfNum) numLabel = '#' + v.perfNum;
-    else numLabel = 'Nº ' + (numMap[v.id] || '?');
+    else numLabel = '#' + (numMap[v.id] || '?');
 
     const dateLabel = v.isLegacy ? 'Legacy · 엑셀 시드' : ((v.date || '날짜 없음') + (v.matinee ? ' · ' + v.matinee : ''));
     const watchedBadge = !v.isLegacy && v.isWatched ? '<span style="font-family: var(--mono); font-size: 9px; color: var(--blood-bright); letter-spacing: 0.2em; margin-left: 8px;">관극</span>' : '';
@@ -2898,7 +2904,7 @@ $('#confirmNewPerf').addEventListener('click', () => {
   renderHistory();
   renderHeader();
   populateVisitSelector();
-  showToast(`Nº ${newPerfNum} 추가됨`);
+  showToast(`#${newPerfNum} 추가됨`);
 });
 
 $('#historySearch').addEventListener('input', () => { historyPage = 0; renderHistory(); });
@@ -3362,7 +3368,7 @@ function renderCastingTracker() {
       const isInactive = (meta.availability === 'Checked Out');
       const debut = (d.actorDebut && d.actorDebut[actor]) ? d.actorDebut[actor] : null;
       const debutHtml = debut
-        ? `<span class="actor-debut" style="font-size: 10px; color: var(--ink-faint); font-family: var(--mono); margin-left: 6px;" title="이 배역 데뷔일">⊳ ${escapeHtml(debut.date)}${debut.num ? ` Nº${debut.num}` : ''}</span>`
+        ? `<span class="actor-debut" style="font-size: 10px; color: var(--ink-faint); font-family: var(--mono); margin-left: 6px;" title="이 배역 데뷔일">⊳ ${escapeHtml(debut.date)}${debut.num ? ` #${debut.num}` : ''}</span>`
         : '';
       return `
         <div class="dist-block${isInactive ? ' is-inactive' : ''}">
@@ -3386,7 +3392,7 @@ function renderCastingTracker() {
             const status = meta.status ? ` <span class="status-badge status-${meta.status.toLowerCase()}">${escapeHtml(meta.status)}</span>` : '';
             return `
               <div class="timeline-item">
-                <span class="timeline-when">Nº${t.num}${t.date ? ' · ' + t.date.slice(5) : ''}</span>
+                <span class="timeline-when">#${t.num}${t.date ? ' · ' + t.date.slice(5) : ''}</span>
                 <span class="timeline-who">${getActorDotHtml(t.actor)}${escapeHtml(t.actor)}${sub}${status}</span>
               </div>
             `;
@@ -3423,7 +3429,7 @@ function renderBulkEditor() {
   const numMap = getVisitNumMap();
   sel.innerHTML = '<option value="">— 회차 선택 —</option>' + chronological.map(v => {
     const castCount = Object.keys(v.casting || {}).length;
-    return `<option value="${v.id}">Nº ${numMap[v.id]} · ${v.date || '날짜 없음'}${castCount ? ' · ' + castCount + '개 입력됨' : ''}</option>`;
+    return `<option value="${v.id}">#${numMap[v.id]} · ${v.date || '날짜 없음'}${castCount ? ' · ' + castCount + '개 입력됨' : ''}</option>`;
   }).join('');
 
   if (bulkCurrentVisitId) {
@@ -3441,7 +3447,7 @@ function loadBulkVisit(visitId) {
   bulkCurrentVisitId = visitId;
   bulkCurrentCasting = { ...(v.casting || {}) };
   const numMap = getVisitNumMap();
-  $('#bulkVisitInfo').textContent = `Nº ${numMap[visitId]} · ${v.date || '날짜 없음'} · ${v.entries.length} encounters`;
+  $('#bulkVisitInfo').textContent = `#${numMap[visitId]} · ${v.date || '날짜 없음'} · ${v.entries.length} encounters`;
   renderBulkInputs();
 }
 
@@ -3485,7 +3491,7 @@ $('#bulkSave').addEventListener('click', () => {
   if (!v) return;
   v.casting = { ...bulkCurrentCasting };
   saveState();
-  showToast(`Nº ${getVisitNumMap()[bulkCurrentVisitId]} 캐스팅 저장됨`);
+  showToast(`#${getVisitNumMap()[bulkCurrentVisitId]} 캐스팅 저장됨`);
   renderBulkEditor();
 });
 
@@ -3964,7 +3970,7 @@ function runPairingQuery() {
   });
 
   const numMap = getVisitNumMap();
-  const visitLinks = matchingVisits.map(v => `Nº${numMap[v.id]}${v.date ? '·' + v.date.slice(5) : ''}`).join(', ');
+  const visitLinks = matchingVisits.map(v => `#${numMap[v.id]}${v.date ? '·' + v.date.slice(5) : ''}`).join(', ');
 
   const cards = Object.entries(pairCounts).sort((a, b) => a[0].localeCompare(b[0])).map(([oc, actors]) => {
     const rows = Object.entries(actors).sort((a, b) => b[1] - a[1]).map(([a, n]) => {
@@ -4195,7 +4201,7 @@ function openActorModal(actor) {
       const actors = e.actor.split(/\s*[X\/]\s*/).map(a => a.trim());
       if (actors.includes(actor)) {
         const scene = getSceneById(e.sceneId);
-        encounters.push({ scene, when: v.isLegacy ? 'Legacy 시드' : `Nº ${numMap[v.id]} · ${v.date || '날짜 없음'}` });
+        encounters.push({ scene, when: v.isLegacy ? 'Legacy 시드' : `#${numMap[v.id]} · ${v.date || '날짜 없음'}` });
       }
     });
   });
@@ -4243,7 +4249,7 @@ function openActorModal(actor) {
         const metaInline = renderActorMetaInline(c, actor);
         const d = charDates[c];
         const debutLine = d
-          ? `<div style="font-size: 10px; color: var(--ink-faint); font-family: var(--mono); margin-top: 3px; line-height: 1.5;">🎭 데뷔 ${escapeHtml(d.debut)}${d.debutNum ? ` · Nº${d.debutNum}` : ''}${d.latest !== d.debut ? `<br>🕐 최근 ${escapeHtml(d.latest)}${d.latestNum ? ` · Nº${d.latestNum}` : ''}` : ''}</div>`
+          ? `<div style="font-size: 10px; color: var(--ink-faint); font-family: var(--mono); margin-top: 3px; line-height: 1.5;">🎭 데뷔 ${escapeHtml(d.debut)}${d.debutNum ? ` · #${d.debutNum}` : ''}${d.latest !== d.debut ? `<br>🕐 최근 ${escapeHtml(d.latest)}${d.latestNum ? ` · #${d.latestNum}` : ''}` : ''}</div>`
           : `<div style="font-size: 10px; color: var(--ink-faint); font-family: var(--mono); margin-top: 3px;">날짜 정보 없음 (Legacy)</div>`;
         return `<div class="modal-history-item"><div class="who">${escapeHtml(c)} ${metaInline}${debutLine}</div><div class="when">${n} 회</div></div>`;
       }).join('')}
@@ -4278,7 +4284,7 @@ function openRoleModal(sceneId) {
   state.visits.forEach(v => {
     v.entries.forEach(e => {
       if (e.sceneId === sceneId) {
-        encounters.push({ actor: e.actor, when: v.isLegacy ? 'Legacy 시드' : `Nº ${numMap[v.id]} · ${v.date || '날짜 없음'}` });
+        encounters.push({ actor: e.actor, when: v.isLegacy ? 'Legacy 시드' : `#${numMap[v.id]} · ${v.date || '날짜 없음'}` });
       }
     });
   });
