@@ -2277,16 +2277,38 @@ function renderManderley() {
 
     let editorHtml = '';
     if (isEditing) {
-      const sceneOpts = MANDERLEY_SCENE_IDS.map(sid => {
-        const sc = getSceneById(sid);
-        return sc ? `<option value="${sid}">${escapeHtml(sc.role)}</option>` : '';
-      }).join('');
+      // The two Manderley encounters have FIXED roles, so pull that night's cast automatically:
+      //   술 시중 (i31)  → Host
+      //   3 on 1 (o31)  → Host X Woman in Bar X Man in Bar
+      const cast = v.casting || {};
+      const host = cast['Host'] || '';
+      const woman = cast['Woman in Bar'] || '';
+      const man = cast['Man in Bar'] || '';
+      const drinkActor = host;
+      const trioActors = [host, woman, man].filter(Boolean).join(' X ');
+
+      const drinkReady = !!drinkActor;
+      const trioReady = host && woman && man;
+
       editorHtml = `
-        <div style="margin-top:14px; padding-top:14px; border-top:1px dashed var(--rule); display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
-          <select class="mand-add-scene" data-vid="${escapeHtml(v.id)}" style="min-width:160px;">${sceneOpts}</select>
-          <input type="text" class="mand-add-actor" data-vid="${escapeHtml(v.id)}" placeholder="배우명 (예: 박상하, 김태양 X ...)" style="flex:1; min-width:180px;">
-          <button class="mini-btn mand-add-go" data-vid="${escapeHtml(v.id)}">+ 만남 추가</button>
-          <button class="mini-btn mand-edit-done" data-vid="${escapeHtml(v.id)}">완료</button>
+        <div style="margin-top:14px; padding-top:14px; border-top:1px dashed var(--rule); display:flex; flex-direction:column; gap:10px;">
+          <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+            <button class="mini-btn mand-add-fixed" data-vid="${escapeHtml(v.id)}" data-scene="i31"
+              style="${drinkReady ? '' : 'opacity:0.5;'}">＋ 맨덜리바 술 시중</button>
+            <span style="font-family:var(--mono); font-size:11px; color:var(--ink-dim);">
+              ${drinkReady ? `Host · ${escapeHtml(drinkActor)}` : '이 회차의 Host 캐스팅을 먼저 입력하세요'}
+            </span>
+          </div>
+          <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+            <button class="mini-btn mand-add-fixed" data-vid="${escapeHtml(v.id)}" data-scene="o31"
+              style="${trioReady ? '' : 'opacity:0.5;'}">＋ 맨덜리바 3 : 1</button>
+            <span style="font-family:var(--mono); font-size:11px; color:var(--ink-dim);">
+              ${trioReady ? escapeHtml(trioActors) : 'Host · Woman in Bar · Man in Bar 캐스팅이 모두 필요합니다'}
+            </span>
+          </div>
+          <div style="display:flex; justify-content:flex-end;">
+            <button class="mini-btn mand-edit-done" data-vid="${escapeHtml(v.id)}">완료</button>
+          </div>
         </div>`;
     }
 
@@ -2384,16 +2406,28 @@ function wireManderleyCardEvents() {
     renderHeader();
     showToast('표시가 해제되었습니다');
   }));
-  $$('.mand-add-go').forEach(b => b.addEventListener('click', () => {
+  $$('.mand-add-fixed').forEach(b => b.addEventListener('click', () => {
     if (guardGuest()) return;
     const vid = b.dataset.vid;
+    const sceneId = b.dataset.scene; // 'i31' or 'o31'
     const v = state.visits.find(x => x.id === vid);
     if (!v) return;
-    const sceneSel = document.querySelector(`.mand-add-scene[data-vid="${CSS.escape(vid)}"]`);
-    const actorInput = document.querySelector(`.mand-add-actor[data-vid="${CSS.escape(vid)}"]`);
-    const sceneId = sceneSel ? sceneSel.value : '';
-    const actor = actorInput ? actorInput.value.trim() : '';
-    if (!sceneId || !actor) { showToast('장면과 배우를 입력하세요'); return; }
+    const cast = v.casting || {};
+    let actor = '';
+    if (sceneId === 'i31') {
+      // 술 시중 → Host
+      actor = cast['Host'] || '';
+      if (!actor) { showToast('이 회차의 Host 캐스팅을 먼저 입력하세요'); return; }
+    } else if (sceneId === 'o31') {
+      // 3 on 1 → Host X Woman in Bar X Man in Bar
+      const trio = [cast['Host'], cast['Woman in Bar'], cast['Man in Bar']];
+      if (trio.some(x => !x)) { showToast('Host · Woman in Bar · Man in Bar 캐스팅이 모두 필요합니다'); return; }
+      actor = trio.join(' X ');
+    }
+    // Prevent duplicate identical encounter
+    if ((v.entries || []).some(e => e.sceneId === sceneId && e.actor === actor)) {
+      showToast('이미 기록된 만남입니다'); return;
+    }
     snapshotForUndo('Manderley 만남 추가');
     v.entries = [...(v.entries || []), { sceneId, actor }];
     touchVisit(v);
@@ -2647,6 +2681,9 @@ function renderHistory() {
       const watchBtn = v.isWatched
         ? `<button class="mini-btn" data-unwatch="${v.id}">관극 해제</button>`
         : `<button class="mini-btn" data-watch="${v.id}">관극 기록</button>`;
+      const mandBtn = v.watchedAsManderley
+        ? `<button class="mini-btn" data-mand-off="${v.id}" style="border-color:var(--gold-dim); color:var(--gold);" title="The Manderley Experience 관람 표시 해제">⌑ ME 해제</button>`
+        : `<button class="mini-btn" data-mand-on="${v.id}" title="이 회차를 The Manderley Experience로 관람 표시">⌑ ME 표시</button>`;
       const editBtn = isCastEditable
         ? `<button class="mini-btn" data-save-edit="${v.id}">완료</button>`
         : `<button class="mini-btn" data-edit-cast="${v.id}">캐스팅 편집</button>`;
@@ -2659,6 +2696,7 @@ function renderHistory() {
         : (v.entries && v.entries.length > 0 ? `<button class="mini-btn" data-edit-legacy="${v.id}">만남 편집</button>` : '');
       actions = `<div class="visit-actions">
         ${watchBtn}
+        ${mandBtn}
         ${editBtn}
         ${metaBtn}
         ${entryEditBtn}
@@ -2808,6 +2846,39 @@ function renderHistory() {
       e.stopPropagation();
       const v = state.visits.find(x => x.id === b.dataset.unwatch);
       if (v) { v.isWatched = false; touchVisit(v); saveState(); queueVisitStatePush(v.id); renderHistory(); renderHeader(); showToast('관극 해제됨'); }
+    });
+  });
+  $$('[data-mand-on]').forEach(b => {
+    b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (guardGuest()) return;
+      const v = state.visits.find(x => x.id === b.dataset.mandOn);
+      if (!v) return;
+      snapshotForUndo('Manderley 관람 표시');
+      v.watchedAsManderley = true;
+      v.isWatched = true;
+      touchVisit(v);
+      queueManderleyPush(v);
+      saveState();
+      renderHistory();
+      renderHeader();
+      showToast('The Manderley Experience로 표시됨');
+    });
+  });
+  $$('[data-mand-off]').forEach(b => {
+    b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (guardGuest()) return;
+      const v = state.visits.find(x => x.id === b.dataset.mandOff);
+      if (!v) return;
+      snapshotForUndo('Manderley 표시 해제');
+      v.watchedAsManderley = false;
+      touchVisit(v);
+      queueManderleyPush(v);
+      saveState();
+      renderHistory();
+      renderHeader();
+      showToast('표시 해제됨 (만남 기록은 유지)');
     });
   });
   // Edit casting mode
