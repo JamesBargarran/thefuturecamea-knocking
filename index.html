@@ -628,7 +628,7 @@ body.role-guest .guest-readonly-note { display: block; }
     </div>
 
     <div class="history-controls">
-      <input type="text" id="historySearch" placeholder="배우, 배역, 메모로 검색…" style="flex: 1; min-width: 240px;">
+      <input type="text" id="historySearch" placeholder="배우·배역·메모 검색 — 또는 ‘너스=David’ 페어 검색" style="flex: 1; min-width: 240px;">
       <select id="historySort">
         <option value="desc">최신순</option>
         <option value="asc">오래된순</option>
@@ -2115,6 +2115,53 @@ let visitMetaEditMode = null; // for editing date/notes/matinee of a visit
 let historyPage = 0; // pagination page (0-based)
 const HISTORY_PAGE_SIZE = 50;
 
+// Pair search: parse a query like "Nurse = David, Matron = Gabriel" into [{role, actor}, ...]
+// Returns null if the query contains no '=' (so the caller falls back to normal OR search).
+function parsePairQuery(raw) {
+  if (!raw || raw.indexOf('=') === -1) return null;
+  const pairs = raw.split(/[,，、]/)         // split multiple pairs on comma (incl. full-width)
+    .map(seg => seg.trim())
+    .filter(Boolean)
+    .map(seg => {
+      const idx = seg.indexOf('=');
+      if (idx === -1) return null;            // a fragment without '=' invalidates nothing; skip it
+      const role = seg.slice(0, idx).trim().toLowerCase();
+      const actor = seg.slice(idx + 1).trim().toLowerCase();
+      if (!role || !actor) return null;
+      return { role, actor };
+    })
+    .filter(Boolean);
+  return pairs.length > 0 ? pairs : null;
+}
+
+// Does a visit satisfy ALL the given role=actor pairs?
+// A pair matches if the visit has a role whose name contains the role text,
+// played by an actor whose name contains the actor text. Checks both casting and entries.
+function visitMatchesPairs(v, pairs) {
+  return pairs.every(({ role, actor }) => {
+    // 1) casting map: { "Nurse Christian Shaw": "David Rafael Botana" }
+    if (v.casting) {
+      for (const [roleName, actorStr] of Object.entries(v.casting)) {
+        if (!roleName.toLowerCase().includes(role)) continue;
+        // actorStr may hold replacements ("A → B") or composites ("A X B")
+        const actors = splitActorString(actorStr);
+        if (actors.some(a => a.toLowerCase().includes(actor))) return true;
+      }
+    }
+    // 2) entries: each entry's scene.role + actor
+    if (Array.isArray(v.entries)) {
+      for (const e of v.entries) {
+        const scene = getSceneById(e.sceneId);
+        const roleName = (scene && scene.role) ? scene.role.toLowerCase() : '';
+        if (!roleName.includes(role)) continue;
+        const actors = splitActorString(e.actor);
+        if (actors.some(a => a.toLowerCase().includes(actor))) return true;
+      }
+    }
+    return false; // this pair not satisfied
+  });
+}
+
 function renderHistory() {
   const term = $('#historySearch').value.toLowerCase().trim();
   const sort = $('#historySort').value;
@@ -2125,9 +2172,12 @@ function renderHistory() {
     visits = visits.filter(v => v.isWatched || v.isLegacy);
   }
 
-  // Search filter — supports text, date (YYYY-MM-DD or partial), perf number (#N or N회), matinee
+  // Search filter — supports text, date, perf number, matinee, AND role=actor pair search
+  const pairQuery = parsePairQuery($('#historySearch').value.trim());
   visits = visits.filter(v => {
     if (!term) return true;
+    // Pair search mode: "Nurse = David, Matron = Gabriel" → all pairs must match
+    if (pairQuery) return visitMatchesPairs(v, pairQuery);
     // Date match
     if (v.date && v.date.toLowerCase().includes(term)) return true;
     // perfNum: '#150' or '150' or '150회'
