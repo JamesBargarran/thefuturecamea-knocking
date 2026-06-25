@@ -541,6 +541,7 @@ body.role-guest .guest-readonly-note { display: block; }
         </div>
         <div class="counter-num" id="totalCount">0</div>
         <div class="counter-label">Visits Recorded</div>
+        <div class="counter-manderley" id="manderleyCounter" style="display:none; font-family: var(--mono); font-size: 9px; letter-spacing: 0.22em; color: var(--ink-faint); text-transform: lowercase; margin-top: 4px;"></div>
         <div style="margin-top: 8px; display: flex; gap: 8px; justify-content: flex-end; align-items: center;">
           <button id="undoBtn" title="마지막 작업 되돌리기" style="background: transparent; border: 1px solid var(--rule); color: var(--ink-faint); font-family: var(--mono); font-size: 9px; letter-spacing: 0.15em; padding: 4px 8px; cursor: pointer;">↶ UNDO</button>
           <span id="saveIndicator" style="font-family: var(--mono); font-size: 9px; color: var(--ink-faint); letter-spacing: 0.1em; opacity: 0.5; transition: opacity 0.3s;">—</span>
@@ -552,6 +553,7 @@ body.role-guest .guest-readonly-note { display: block; }
   <nav>
     <button class="tab active" data-page="record">기록 · Record</button>
     <button class="tab" data-page="history">회차 · Visits</button>
+    <button class="tab" data-page="manderley">맨덜리 · Manderley</button>
     <button class="tab" data-page="stats">통계 · Cast</button>
     <button class="tab" data-page="roles">배역 · Roles</button>
     <button class="tab" data-page="casting">캐스팅 · Casting</button>
@@ -675,6 +677,29 @@ body.role-guest .guest-readonly-note { display: block; }
     </div>
 
     <div id="historyList"></div>
+  </div>
+
+  <div class="page" id="page-manderley">
+    <h2 class="section-title">The Manderley Experience</h2>
+    <div class="section-rule"><div class="line"></div><div class="ornament">✦</div><div class="line"></div></div>
+    <div class="casting-intro" style="margin-bottom: 20px;">
+      The Manderley Experience는 별도 공연이 아니라, 본 공연의 <strong>3rd 루프에 맨덜리바에서 진행되는 스핀오프 입장 형태</strong>입니다 (2026년 6월 4일 시작).
+      이 화면은 <strong>The Manderley Experience로 관람한 회차만 모아 보는 필터 뷰</strong>입니다. 가능한 만남은 <strong>맨덜리바 술 시중</strong>과 <strong>맨덜리바 3:1</strong>이며, 두 장면은 일반 관객도 만날 수 있습니다.
+    </div>
+
+    <div class="history-controls" data-auth-only style="margin-bottom: 16px;">
+      <div id="mandPicker" style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; flex:1;"></div>
+    </div>
+
+    <div class="history-controls">
+      <input type="text" id="mandSearch" placeholder="배우·배역·메모 검색 — 또는 ‘Host = 박상하’ 페어 검색" style="flex: 1; min-width: 240px;">
+      <select id="mandSort">
+        <option value="desc">최신순</option>
+        <option value="asc">오래된순</option>
+      </select>
+    </div>
+
+    <div id="mandList"></div>
   </div>
 
   <div class="page" id="page-stats">
@@ -1431,10 +1456,17 @@ function showToast(msg) {
   setTimeout(() => t.classList.remove('show'), 2200);
 }
 function getWatchedCount() {
-  // Number of performances the user has watched (isWatched=true), including legacy counts
+  // Full-show watches (excludes Manderley Experience views, which are 3rd-loop-only)
   return state.visits.reduce((sum, v) => {
     if (v.isLegacy) return sum + (v.legacyViewCount || 0);
-    return sum + (v.isWatched ? 1 : 0);
+    return sum + ((v.isWatched && !v.watchedAsManderley) ? 1 : 0);
+  }, 0);
+}
+function getManderleyCount() {
+  // The Manderley Experience views (3rd-loop-only spinoff entry to a regular performance)
+  return state.visits.reduce((sum, v) => {
+    if (v.isLegacy) return sum;
+    return sum + (v.watchedAsManderley ? 1 : 0);
   }, 0);
 }
 function getPerformanceCount() {
@@ -1969,8 +2001,10 @@ function applyVisitSelectorChange() {
     $('#visitNotes').value = '';
     $('#visitDate').disabled = false;
     $('#visitMatinee').disabled = false;
-    // Fresh entry → clear any loaded casting
+    // Fresh entry → clear any loaded casting and encounters
     currentCasting = {};
+    selectedScenes = [];
+    renderSelected();
     renderCastingInputs();
     return;
   }
@@ -1990,6 +2024,19 @@ function applyVisitSelectorChange() {
   const userOverride = v.userCasting || {};
   currentCasting = { ...baseCasting, ...userOverride };
   renderCastingInputs();
+  // Load already-recorded encounters into the editor so they're visible and
+  // can be edited/removed without creating duplicates on save.
+  selectedScenes = (v.entries || []).map(e => {
+    const scene = getSceneById(e.sceneId);
+    if (scene && isFreeComboScene(scene)) {
+      return { sceneId: e.sceneId, freeComboActors: splitActorString(e.actor) };
+    }
+    if (scene && isComposedScene(scene)) {
+      return { sceneId: e.sceneId, componentActors: splitActorString(e.actor) };
+    }
+    return { sceneId: e.sceneId, actor: e.actor };
+  });
+  renderSelected();
   // Lock date/matinee when editing existing visit
   $('#visitDate').disabled = true;
   $('#visitMatinee').disabled = true;
@@ -2042,8 +2089,10 @@ $('#saveVisit').addEventListener('click', () => {
     // Append entries to an existing visit (and mark as watched)
     const v = state.visits.find(x => x.id === visitChoice);
     if (!v) { showToast('회차를 찾을 수 없습니다'); return; }
-    snapshotForUndo(`#${v.perfNum || ''} 회차에 만남 추가`);
-    v.entries = [...(v.entries || []), ...entries];
+    snapshotForUndo(`#${v.perfNum || ''} 회차 만남 기록`);
+    // selectedScenes already holds the full set (existing entries were loaded in on
+    // selection), so REPLACE rather than append — this prevents duplicate encounters.
+    v.entries = entries;
     const isSeedPerf = v.id && v.id.startsWith('perf_') && !v.userAdded;
     if (Object.keys(currentCasting).length > 0) {
       if (isSeedPerf && !currentUserIsAdmin) {
@@ -2075,7 +2124,7 @@ $('#saveVisit').addEventListener('click', () => {
     } else {
       queueVisitStatePush(v.id);
     }
-    showToast(`#${v.perfNum || ''} 회차에 ${entries.length}개 만남 추가됨`);
+    showToast(`#${v.perfNum || ''} 회차에 만남 ${entries.length}개 기록됨`);
   }
 
   saveState();
@@ -2168,9 +2217,212 @@ function visitMatchesPairs(v, pairs) {
   });
 }
 
+// ============ THE MANDERLEY EXPERIENCE ============
+// The Manderley Experience is NOT a separate performance — it's a 3rd-loop spinoff entry
+// to a regular performance, resident in the Manderley Bar. A visit gains the flag
+// `watchedAsManderley = true`. This tab is a FILTER VIEW collecting those visits.
+// Encounters share scenes i31 (맨덜리바 술 시중) and o31 (맨덜리바 3:1).
+const MANDERLEY_SCENE_IDS = ['i31', 'o31'];
+let mandEditMode = null; // visit id whose encounter editor is open
+
+function renderManderley() {
+  const searchEl = $('#mandSearch');
+  const sortEl = $('#mandSort');
+  const term = searchEl ? searchEl.value.toLowerCase().trim() : '';
+  const sort = sortEl ? sortEl.value : 'desc';
+  let visits = state.visits.filter(v => v.watchedAsManderley);
+
+  // Search: support role=actor pair search OR plain text (actor / notes / date)
+  const pairQuery = parsePairQuery(searchEl ? searchEl.value.trim() : '');
+  visits = visits.filter(v => {
+    if (!term) return true;
+    if (pairQuery) return visitMatchesPairs(v, pairQuery);
+    if (v.notes && v.notes.toLowerCase().includes(term)) return true;
+    if (v.date && v.date.toLowerCase().includes(term)) return true;
+    return (v.entries || []).some(e => {
+      const scene = getSceneById(e.sceneId);
+      return (scene && scene.role.toLowerCase().includes(term)) ||
+             (e.actor && e.actor.toLowerCase().includes(term));
+    });
+  });
+
+  visits.sort((a, b) => sort === 'asc' ? compareVisitsChronoDesc(b, a) : compareVisitsChronoDesc(a, b));
+
+  const numMap = getVisitNumMap();
+  const list = $('#mandList');
+  if (!list) return;
+  if (visits.length === 0) {
+    list.innerHTML = term
+      ? `<div style="color: var(--ink-faint); padding: 40px; font-style: italic; text-align: center;">조건에 맞는 기록이 없습니다.</div>`
+      : `<div style="color: var(--ink-faint); padding: 48px 24px; font-style: italic; text-align: center;">아직 The Manderley Experience로 관람한 회차가 없습니다.<br>아래에서 관람한 공연 회차를 골라 표시해 보세요.</div>`;
+    renderMandPicker();
+    return;
+  }
+
+  list.innerHTML = visits.map(v => {
+    const isEditing = mandEditMode === v.id;
+    const entriesHtml = (v.entries || []).length === 0
+      ? `<div style="color: var(--ink-faint); font-style: italic; font-size: 13px; padding: 4px 0;">기록된 만남 없음</div>`
+      : (v.entries || []).map((e, idx) => {
+          const scene = getSceneById(e.sceneId);
+          const roleName = scene ? scene.role : '(삭제된 장면)';
+          return `<div class="visit-entry">
+            <span class="role">${escapeHtml(roleName)}</span>
+            <span class="actor" style="display:flex; align-items:center; gap:6px;">
+              <span class="actor-name-display">${getActorDotHtml(e.actor)}${escapeHtml(e.actor)}</span>
+              ${isEditing ? `<button class="mand-entry-del" data-vid="${escapeHtml(v.id)}" data-eidx="${idx}" style="background:none; border:1px solid var(--rule); color:var(--ink-faint); cursor:pointer; font-size:12px; padding:2px 7px; line-height:1;" title="이 항목 삭제">×</button>` : ''}
+            </span>
+          </div>`;
+        }).join('');
+
+    let editorHtml = '';
+    if (isEditing) {
+      const sceneOpts = MANDERLEY_SCENE_IDS.map(sid => {
+        const sc = getSceneById(sid);
+        return sc ? `<option value="${sid}">${escapeHtml(sc.role)}</option>` : '';
+      }).join('');
+      editorHtml = `
+        <div style="margin-top:14px; padding-top:14px; border-top:1px dashed var(--rule); display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+          <select class="mand-add-scene" data-vid="${escapeHtml(v.id)}" style="min-width:160px;">${sceneOpts}</select>
+          <input type="text" class="mand-add-actor" data-vid="${escapeHtml(v.id)}" placeholder="배우명 (예: 박상하, 김태양 X ...)" style="flex:1; min-width:180px;">
+          <button class="mini-btn mand-add-go" data-vid="${escapeHtml(v.id)}">+ 만남 추가</button>
+          <button class="mini-btn mand-edit-done" data-vid="${escapeHtml(v.id)}">완료</button>
+        </div>`;
+    }
+
+    const numLabel = v.isLegacy ? '⌖' : (v.perfNum ? '#' + v.perfNum : '#' + (numMap[v.id] || '?'));
+    const dateLabel = (v.date || '날짜 없음') + (v.matinee ? ' · ' + v.matinee : '');
+    return `
+      <div class="visit-card" style="margin-bottom:16px;">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px;">
+          <div>
+            <div style="font-family:var(--serif-display); font-size:22px; font-style:italic; color:var(--gold);">${numLabel} <span style="font-size:16px; color:var(--ink-dim);">· ${escapeHtml(dateLabel)}</span></div>
+            <div style="font-family:var(--mono); font-size:11px; color:var(--ink-faint); margin-top:4px;">${(v.entries||[]).length} encounters${v.notes ? ' · ' + escapeHtml(v.notes) : ''}</div>
+          </div>
+          <div style="display:flex; gap:6px; flex-wrap:wrap;" data-auth-only>
+            <button class="mini-btn mand-edit" data-vid="${escapeHtml(v.id)}">${isEditing ? '편집 중' : '만남 편집'}</button>
+            <button class="mini-btn mand-unflag" data-vid="${escapeHtml(v.id)}" title="이 회차의 Manderley 관람 표시를 해제합니다">표시 해제</button>
+          </div>
+        </div>
+        <div style="margin-top:12px;">${entriesHtml}</div>
+        ${editorHtml}
+      </div>`;
+  }).join('');
+
+  renderMandPicker();
+  wireManderleyCardEvents();
+}
+
+// Picker: choose any recorded performance and mark it as watched via The Manderley Experience.
+function renderMandPicker() {
+  const picker = $('#mandPicker');
+  if (!picker) return;
+  // Candidate visits: real performances not already flagged Manderley
+  const candidates = state.visits
+    .filter(v => !v.isLegacy && !v.watchedAsManderley)
+    .sort(compareVisitsChronoDesc);
+  const numMap = getVisitNumMap();
+  const opts = candidates.map(v => {
+    const num = v.perfNum ? '#' + v.perfNum : '#' + (numMap[v.id] || '?');
+    const label = `${num} · ${v.date || '날짜 없음'}${v.matinee ? ' ' + v.matinee : ''}`;
+    return `<option value="${escapeHtml(v.id)}">${escapeHtml(label)}</option>`;
+  }).join('');
+  picker.innerHTML = `
+    <select id="mandPickSelect" style="flex:1; min-width:220px;">${opts || '<option value="">표시할 회차 없음</option>'}</select>
+    <button class="mini-btn" id="mandPickGo" style="padding:8px 16px;">＋ The Manderley Experience로 표시</button>`;
+  const goBtn = $('#mandPickGo');
+  if (goBtn) goBtn.addEventListener('click', () => {
+    if (guardGuest()) return;
+    const sel = $('#mandPickSelect');
+    const vid = sel ? sel.value : '';
+    if (!vid) { showToast('표시할 회차를 선택하세요'); return; }
+    const v = state.visits.find(x => x.id === vid);
+    if (!v) return;
+    snapshotForUndo('Manderley 관람 표시');
+    v.watchedAsManderley = true;
+    v.isWatched = true;
+    touchVisit(v);
+    queueManderleyPush(v);
+    saveState();
+    renderManderley();
+    renderHeader();
+    showToast('The Manderley Experience로 표시되었습니다');
+  });
+}
+
+// Persist a Manderley flag/encounters change. Seed performances use visit-state;
+// user-added visits use the added-visits table. Both already carry entries.
+function queueManderleyPush(v) {
+  if (v.userAdded || (v.id && !v.id.startsWith('perf_'))) {
+    queueAddedVisitPush(v.id);
+  } else {
+    queueVisitStatePush(v.id);
+  }
+}
+
+function wireManderleyCardEvents() {
+  $$('.mand-edit').forEach(b => b.addEventListener('click', () => {
+    if (guardGuest()) return;
+    mandEditMode = (mandEditMode === b.dataset.vid) ? null : b.dataset.vid;
+    renderManderley();
+  }));
+  $$('.mand-edit-done').forEach(b => b.addEventListener('click', () => {
+    mandEditMode = null;
+    renderManderley();
+  }));
+  $$('.mand-unflag').forEach(b => b.addEventListener('click', () => {
+    if (guardGuest()) return;
+    const v = state.visits.find(x => x.id === b.dataset.vid);
+    if (!v) return;
+    if (!confirm(`${v.date} 회차의 The Manderley Experience 관람 표시를 해제할까요? (만남 기록은 유지됩니다)`)) return;
+    snapshotForUndo('Manderley 표시 해제');
+    v.watchedAsManderley = false;
+    touchVisit(v);
+    queueManderleyPush(v);
+    saveState();
+    renderManderley();
+    renderHeader();
+    showToast('표시가 해제되었습니다');
+  }));
+  $$('.mand-add-go').forEach(b => b.addEventListener('click', () => {
+    if (guardGuest()) return;
+    const vid = b.dataset.vid;
+    const v = state.visits.find(x => x.id === vid);
+    if (!v) return;
+    const sceneSel = document.querySelector(`.mand-add-scene[data-vid="${CSS.escape(vid)}"]`);
+    const actorInput = document.querySelector(`.mand-add-actor[data-vid="${CSS.escape(vid)}"]`);
+    const sceneId = sceneSel ? sceneSel.value : '';
+    const actor = actorInput ? actorInput.value.trim() : '';
+    if (!sceneId || !actor) { showToast('장면과 배우를 입력하세요'); return; }
+    snapshotForUndo('Manderley 만남 추가');
+    v.entries = [...(v.entries || []), { sceneId, actor }];
+    touchVisit(v);
+    queueManderleyPush(v);
+    saveState();
+    renderManderley();
+    showToast('만남이 추가되었습니다');
+  }));
+  $$('.mand-entry-del').forEach(b => b.addEventListener('click', () => {
+    if (guardGuest()) return;
+    const v = state.visits.find(x => x.id === b.dataset.vid);
+    if (!v) return;
+    const idx = parseInt(b.dataset.eidx);
+    snapshotForUndo('Manderley 만남 삭제');
+    v.entries.splice(idx, 1);
+    touchVisit(v);
+    queueManderleyPush(v);
+    saveState();
+    renderManderley();
+    showToast('만남 삭제됨');
+  }));
+}
+
+
 function renderHistory() {
   const term = $('#historySearch').value.toLowerCase().trim();
   const sort = $('#historySort').value;
+  // The Manderley Experience is a flag on a regular performance, not a separate visit,
+  // so these visits remain in the normal Visits list (shown with a small marker).
   let visits = [...state.visits];
 
   // Scope filter
@@ -2376,6 +2628,7 @@ function renderHistory() {
 
     const dateLabel = v.isLegacy ? 'Legacy · 엑셀 시드' : ((v.date || '날짜 없음') + (v.matinee ? ' · ' + v.matinee : ''));
     const watchedBadge = !v.isLegacy && v.isWatched ? '<span style="font-family: var(--mono); font-size: 9px; color: var(--blood-bright); letter-spacing: 0.2em; margin-left: 8px;">관극</span>' : '';
+    const manderleyBadge = v.watchedAsManderley ? '<span style="font-family: var(--mono); font-size: 9px; color: var(--gold); letter-spacing: 0.18em; margin-left: 8px;" title="The Manderley Experience로 관람">⌑ ME</span>' : '';
 
     // Actions
     let actions = '';
@@ -2441,7 +2694,7 @@ function renderHistory() {
           <div class="visit-header-left">
             <span class="visit-num">${numLabel}</span>
             <div>
-              <div class="visit-date">${escapeHtml(dateLabel)}${watchedBadge}</div>
+              <div class="visit-date">${escapeHtml(dateLabel)}${watchedBadge}${manderleyBadge}</div>
               <div class="visit-meta">${v.entries.length} encounters${castingEntries.length ? ' · ' + castingEntries.length + ' cast' : ''}${v.isLegacy ? ' · ' + (v.legacyViewCount || 0) + ' visits' : ''}</div>
             </div>
           </div>
@@ -2740,6 +2993,9 @@ function renderHistory() {
       }
       saveState();
       renderHistory();
+      // Keep the card open and stay in edit mode so deleting one entry doesn't collapse the card
+      const reopenBody = $('#vbody-' + v.id);
+      if (reopenBody) reopenBody.classList.add('open');
       showToast('항목 삭제됨');
     });
   });
@@ -2909,6 +3165,10 @@ $('#confirmNewPerf').addEventListener('click', () => {
 
 $('#historySearch').addEventListener('input', () => { historyPage = 0; renderHistory(); });
 $('#historySort').addEventListener('change', () => { historyPage = 0; renderHistory(); });
+
+// ---- The Manderley Experience handlers ----
+$('#mandSearch') && $('#mandSearch').addEventListener('input', () => renderManderley());
+$('#mandSort') && $('#mandSort').addEventListener('change', () => renderManderley());
 
 // ============ STATS ============
 // Rule 8: If same actor plays both Bellhop AND Sixth Floor Nurse in one visit, count as 1 appearance
@@ -5012,15 +5272,27 @@ $('#resetScenes').addEventListener('click', () => {
 function renderHeader() {
   const watched = getWatchedCount();
   const total = getPerformanceCount();
+  const manderley = getManderleyCount();
   $('#totalCount').textContent = watched;
   // Update counter label to show context
   const labelEl = document.querySelector('.counter-label');
   if (labelEl) labelEl.innerHTML = total > 0 ? `Watched / ${total} Performances` : 'Visits Recorded';
+  // Manderley Experience sub-line (only shown when there are any)
+  const mEl = document.getElementById('manderleyCounter');
+  if (mEl) {
+    if (manderley > 0) {
+      mEl.textContent = `⤷ the manderley experience · ${manderley}`;
+      mEl.style.display = '';
+    } else {
+      mEl.style.display = 'none';
+    }
+  }
 }
 
 function renderActive(page) {
   if (page === 'record') { renderScenes(); renderCastingInputs(); populateVisitSelector(); }
   else if (page === 'history') renderHistory();
+  else if (page === 'manderley') renderManderley();
   else if (page === 'stats') renderStats();
   else if (page === 'roles') renderRoles();
   else if (page === 'casting') {
@@ -5244,14 +5516,16 @@ async function fetchUserDataFromSupabase() {
         isWatched: r.is_watched,
         entries: r.entries || [],
         userNotes: r.user_notes,
-        userCasting: r.user_casting || {}
+        userCasting: r.user_casting || {},
+        watchedAsManderley: !!r.watched_as_manderley
       };
       return acc;
     }, {}),
     addedVisits: (addedVisits.data || []).map(r => ({
       id: r.visit_id, date: r.date, matinee: r.matinee || '',
       notes: r.notes || '', casting: r.casting || {}, entries: r.entries || [],
-      isWatched: r.is_watched, isLegacy: false, userAdded: true
+      isWatched: r.is_watched, isLegacy: false, userAdded: true,
+      watchedAsManderley: !!r.watched_as_manderley
     }))
   };
 }
@@ -5411,7 +5685,8 @@ async function _flushPushQueueInner() {
         is_watched: !!v.isWatched,
         entries: v.entries || [],
         user_notes: v.userNotes || '',
-        user_casting: v.userCasting || {}
+        user_casting: v.userCasting || {},
+        watched_as_manderley: !!v.watchedAsManderley
       });
     }
   });
@@ -5456,7 +5731,8 @@ async function _flushPushQueueInner() {
         notes: v.notes || '',
         casting: v.casting || {},
         entries: v.entries || [],
-        is_watched: !!v.isWatched
+        is_watched: !!v.isWatched,
+        watched_as_manderley: !!v.watchedAsManderley
       });
     } else if (!v) {
       avDeletes.push(vid);
@@ -5657,6 +5933,7 @@ async function loadFromSupabase() {
       if (u) {
         v.isWatched = u.isWatched;
         v.entries = u.entries || v.entries;
+        v.watchedAsManderley = !!u.watchedAsManderley;
         // Separate seed notes from user notes — never concatenate cumulatively
         if (!('seedNotes' in v)) v.seedNotes = v.notes || '';
         v.userNotes = u.userNotes || '';
