@@ -174,6 +174,22 @@ h2.section-title { font-family: var(--serif-display); font-size: 36px; font-weig
 .role-summary .role-type { font-family: var(--mono); font-size: 10px; letter-spacing: 0.24em; color: var(--gold); text-transform: uppercase; margin-top: 2px; }
 .role-summary .role-actors { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 6px; }
 .actor-chip { font-family: var(--mono); font-size: 10px; background: var(--paper-deep); border: 1px solid var(--rule); padding: 4px 8px; color: var(--ink-dim); display: inline-flex; align-items: center; gap: 5px; }
+
+/* Interactions tab */
+.ix-section { margin-bottom: 36px; }
+.ix-section-header { display: flex; align-items: baseline; gap: 12px; border-bottom: 1px solid var(--rule); padding-bottom: 8px; margin-bottom: 16px; }
+.ix-type-label { font-family: var(--serif-display); font-size: 20px; font-style: italic; color: var(--ink); }
+.ix-section-count { font-family: var(--mono); font-size: 10px; letter-spacing: 0.2em; color: var(--gold); text-transform: uppercase; }
+.ix-empty { color: var(--ink-faint); font-style: italic; font-size: 13px; padding: 12px 0; }
+.ix-card { background: var(--paper-raised); border: 1px solid var(--rule); margin-bottom: 10px; }
+.ix-card-header { display: flex; align-items: baseline; justify-content: space-between; padding: 12px 16px 8px; border-bottom: 1px dotted var(--rule); }
+.ix-role { font-family: var(--serif-display); font-size: 16px; font-style: italic; color: var(--ink); }
+.ix-count { font-family: var(--mono); font-size: 13px; font-weight: 600; color: var(--blood-bright); }
+.ix-entries { padding: 8px 16px 12px; display: flex; flex-direction: column; gap: 4px; }
+.ix-entry { display: flex; align-items: center; gap: 10px; font-size: 12px; }
+.ix-date { font-family: var(--mono); font-size: 11px; color: var(--ink-dim); min-width: 140px; }
+.ix-actor { font-family: var(--serif-body); color: var(--ink); display: flex; align-items: center; gap: 4px; }
+.ix-legacy { font-family: var(--mono); font-size: 9px; letter-spacing: 0.15em; color: var(--ink-faint); border: 1px solid var(--rule); padding: 1px 5px; text-transform: uppercase; margin-right: 4px; }
 .actor-chip .chip-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
 .actor-chip.seen { border-color: var(--blood); color: var(--ink); }
 .actor-chip .n { color: var(--blood-bright); margin-left: 4px; font-weight: 600; }
@@ -556,6 +572,7 @@ body.role-guest .guest-readonly-note { display: block; }
     <button class="tab" data-page="manderley">맨덜리 · Manderley</button>
     <button class="tab" data-page="stats">통계 · Cast</button>
     <button class="tab" data-page="roles">배역 · Roles</button>
+    <button class="tab" data-page="interactions">인터랙션 통계 · Interactions</button>
     <button class="tab" data-page="casting">캐스팅 · Casting</button>
     <button class="tab" data-page="scenes">장면 풀 · Scenes</button>
     <button class="tab" data-page="pairing">페어링 · Pairing</button>
@@ -755,6 +772,24 @@ body.role-guest .guest-readonly-note { display: block; }
       </select>
     </div>
     <div class="role-grid" id="rolesList"></div>
+  </div>
+
+  <div class="page" id="page-interactions">
+    <h2 class="section-title">Interactions</h2>
+    <div class="section-rule"><div class="line"></div><div class="ornament">✦</div><div class="line"></div></div>
+    <div class="history-controls">
+      <input type="text" id="interactionSearch" placeholder="배역명 또는 퍼포머 검색…" style="flex: 1; min-width: 240px;">
+      <select id="interactionType">
+        <option value="all">전체 유형</option>
+        <option value="1:1">1:1</option>
+        <option value="인터랙션">인터랙션</option>
+        <option value="워크아웃">워크아웃</option>
+      </select>
+      <label style="display:flex; align-items:center; gap:6px; font-family:var(--mono); font-size:11px; color:var(--ink-dim); white-space:nowrap; cursor:pointer;">
+        <input type="checkbox" id="interactionExcludeLegacy" checked> 레거시 제외
+      </label>
+    </div>
+    <div id="interactionsList"></div>
   </div>
 
   <div class="page" id="page-casting">
@@ -3557,6 +3592,103 @@ function renderRoles() {
 $('#roleSearch').addEventListener('input', renderRoles);
 $('#roleType').addEventListener('change', renderRoles);
 
+// ============ INTERACTIONS ============
+function renderInteractions() {
+  const term = $('#interactionSearch').value.toLowerCase().trim();
+  const filterType = $('#interactionType').value;
+  const excludeLegacy = $('#interactionExcludeLegacy').checked;
+
+  // Collect all entries from watched visits
+  // Structure: sceneId -> { scene, occurrences: [{date, matinee, perfNum, actor, isLegacy}] }
+  const sceneMap = {};
+  state.visits.forEach(v => {
+    if (!v.isWatched) return;
+    (v.entries || []).forEach(e => {
+      if (!e.sceneId) return;
+      if (!sceneMap[e.sceneId]) sceneMap[e.sceneId] = { occurrences: [] };
+      sceneMap[e.sceneId].occurrences.push({
+        date: v.date || '',
+        matinee: v.matinee || '',
+        perfNum: v.perfNum || null,
+        actor: e.actor || '',
+        isLegacy: !!v.isLegacy
+      });
+    });
+  });
+
+  // Group by type
+  const TYPE_ORDER = ['1:1', '인터랙션', '워크아웃'];
+  const groups = { '1:1': [], '인터랙션': [], '워크아웃': [] };
+
+  state.scenes.forEach(s => {
+    if (filterType !== 'all' && s.type !== filterType) return;
+    if (!TYPE_ORDER.includes(s.type)) return;
+    const data = sceneMap[s.id];
+    let occurrences = data ? [...data.occurrences] : [];
+    if (excludeLegacy) occurrences = occurrences.filter(o => !o.isLegacy);
+    if (occurrences.length === 0) return;
+    if (term && !s.role.toLowerCase().includes(term) &&
+        !occurrences.some(o => o.actor.toLowerCase().includes(term))) return;
+    groups[s.type].push({ scene: s, occurrences });
+  });
+
+  // Sort each group by count desc
+  TYPE_ORDER.forEach(t => {
+    groups[t].sort((a, b) => b.occurrences.length - a.occurrences.length);
+  });
+
+  const TYPE_LABELS = { '1:1': '1:1 원온원', '인터랙션': '인터랙션', '워크아웃': '워크아웃' };
+
+  let html = '';
+  TYPE_ORDER.forEach(type => {
+    if (filterType !== 'all' && filterType !== type) return;
+    const items = groups[type];
+    if (items.length === 0 && filterType === 'all') return;
+    const total = items.reduce((s, x) => s + x.occurrences.length, 0);
+    html += `
+      <div class="ix-section">
+        <div class="ix-section-header">
+          <span class="ix-type-label">${TYPE_LABELS[type]}</span>
+          <span class="ix-section-count">${items.length}개 배역 · 총 ${total}회</span>
+        </div>
+        ${items.length === 0 ? '<div class="ix-empty">기록 없음</div>' : items.map(({ scene, occurrences }) => {
+          const sorted = [...occurrences].sort((a, b) => {
+            if (!a.date && !b.date) return 0;
+            if (!a.date) return 1;
+            if (!b.date) return -1;
+            return b.date.localeCompare(a.date);
+          });
+          return `
+            <div class="ix-card">
+              <div class="ix-card-header">
+                <span class="ix-role">${escapeHtml(scene.role)}</span>
+                <span class="ix-count">×${occurrences.length}</span>
+              </div>
+              <div class="ix-entries">
+                ${sorted.map(o => {
+                  const dateStr = o.date ? `${o.date}${o.matinee ? ' ' + o.matinee : ''}` : '(날짜 미상)';
+                  const perfStr = o.perfNum ? `#${o.perfNum} · ` : '';
+                  const tag = o.actor ? getActorTag(o.actor) : null;
+                  const dot = tag ? `<span class="chip-dot" style="background:${COLOR_VARS[tag]};display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:3px;vertical-align:middle;"></span>` : '';
+                  const legacyMark = o.isLegacy ? '<span class="ix-legacy">legacy</span>' : '';
+                  return `<div class="ix-entry">${legacyMark}<span class="ix-date">${perfStr}${dateStr}</span>${o.actor ? `<span class="ix-actor">${dot}${escapeHtml(o.actor)}</span>` : ''}</div>`;
+                }).join('')}
+              </div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    `;
+  });
+
+  if (!html.trim()) html = '<div style="padding:40px;text-align:center;color:var(--ink-faint);font-style:italic;">기록된 인터랙션이 없습니다</div>';
+  $('#interactionsList').innerHTML = html;
+}
+
+$('#interactionSearch').addEventListener('input', renderInteractions);
+$('#interactionType').addEventListener('change', renderInteractions);
+$('#interactionExcludeLegacy').addEventListener('change', renderInteractions);
+
 // ============ CASTING ============
 $$('.casting-mode-toggle button').forEach(b => {
   b.addEventListener('click', () => {
@@ -5388,6 +5520,7 @@ function renderActive(page) {
   else if (page === 'manderley') renderManderley();
   else if (page === 'stats') renderStats();
   else if (page === 'roles') renderRoles();
+  else if (page === 'interactions') renderInteractions();
   else if (page === 'casting') {
     const activeMode = $$('.casting-mode-toggle button').find(b => b.classList.contains('active'));
     const mode = activeMode ? activeMode.dataset.mode : 'view';
