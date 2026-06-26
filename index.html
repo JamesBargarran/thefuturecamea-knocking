@@ -4792,7 +4792,14 @@ function openRoleModal(sceneId) {
   const count = encounters.length;
   const prob = totalViews ? (count / totalViews * 100).toFixed(1) : '0.0';
   const byActor = {};
-  encounters.forEach(e => byActor[e.actor] = (byActor[e.actor] || 0) + 1);
+  encounters.forEach(e => { if (e.actor) byActor[e.actor] = (byActor[e.actor] || 0) + 1; });
+
+  // Pool actors first, then any actors seen in history but no longer in the pool
+  const poolActors = getSceneActors(scene);
+  const poolSet = new Set(poolActors);
+  const extraActors = Object.keys(byActor).filter(a => a && !poolSet.has(a))
+    .sort((a, b) => byActor[b] - byActor[a]);
+  const allActors = [...poolActors, ...extraActors];
 
   const content = `
     <div style="display: flex; gap: 24px; margin-bottom: 24px; padding: 16px; background: var(--paper-raised); border: 1px solid var(--rule);">
@@ -4801,10 +4808,12 @@ function openRoleModal(sceneId) {
     </div>
     <div style="margin-bottom: 24px;">
       <div style="font-family: var(--mono); font-size: 10px; color: var(--gold); letter-spacing: 0.24em; text-transform: uppercase; margin-bottom: 8px;">배우별 받은 횟수</div>
-      ${getSceneActors(scene).map(a => {
+      ${allActors.map(a => {
         const c = byActor[a] || 0;
         const p = totalViews ? (c / totalViews * 100).toFixed(1) : '0.0';
-        return `<div class="modal-history-item"><div class="who">${getActorDotHtml(a)}${escapeHtml(a)}</div><div class="when">${c} · ${p}%</div></div>`;
+        const isExtra = !poolSet.has(a);
+        const extraTag = isExtra ? `<span style="font-family:var(--mono);font-size:9px;color:var(--ink-faint);margin-left:5px;">구 풀</span>` : '';
+        return `<div class="modal-history-item"><div class="who">${getActorDotHtml(a)}${escapeHtml(a)}${extraTag}</div><div class="when">${c} · ${p}%</div></div>`;
       }).join('')}
     </div>
     <div>
