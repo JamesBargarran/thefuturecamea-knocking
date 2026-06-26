@@ -833,6 +833,7 @@ body.role-guest .guest-readonly-note { display: block; }
         <option value="인터랙션">인터랙션</option>
         <option value="워크아웃">워크아웃</option>
       </select>
+      <button id="bulkSyncLinkedBtn" style="background: var(--paper-raised); border: 1px solid var(--gold-dim); color: var(--gold); font-family: var(--mono); font-size: 10px; letter-spacing: 0.15em; text-transform: uppercase; padding: 8px 14px; cursor: pointer; white-space: nowrap;">장면 풀 일괄 동기화</button>
     </div>
 
     <div class="scene-pool-grid" id="scenePoolGrid"></div>
@@ -4238,6 +4239,7 @@ function renderScenePool() {
 
 $('#scenePoolSearch').addEventListener('input', (e) => { scenePoolSearchTerm = e.target.value; renderScenePool(); });
 $('#scenePoolFilter').addEventListener('change', (e) => { scenePoolFilterType = e.target.value; renderScenePool(); });
+$('#bulkSyncLinkedBtn').addEventListener('click', bulkSyncLinkedScenes);
 
 $('#addNewScene').addEventListener('click', () => {
   const type = $('#newSceneType').value;
@@ -5964,6 +5966,28 @@ function propagateActorToLinkedScenes(charName, actorName) {
   });
   if (changed) saveState();
 }
+function bulkSyncLinkedScenes() {
+  let syncedScenes = 0;
+  state.characters.forEach(char => {
+    (char.actors || []).forEach(actorName => {
+      state.scenes.forEach(s => {
+        if (!s.composedOf && s.linkedChar === char.name && !s.actors.includes(actorName)) {
+          s.actors.push(actorName);
+          queueScenePush(s.id);
+          syncedScenes++;
+        }
+      });
+    });
+  });
+  if (syncedScenes > 0) {
+    saveState();
+    renderScenePool();
+    showToast(`일괄 동기화 완료 — ${syncedScenes}개 장면 풀 업데이트됨`);
+  } else {
+    showToast('동기화할 내용 없음 (이미 최신 상태)');
+  }
+}
+
 function queuePerformancePush(perfId) {
   if (!sb || !currentUserIsAdmin) return;
   adminPushQueue.performances.add(perfId);
