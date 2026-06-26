@@ -181,7 +181,8 @@ h2.section-title { font-family: var(--serif-display); font-size: 36px; font-weig
 .ix-type-label { font-family: var(--serif-display); font-size: 20px; font-style: italic; color: var(--ink); }
 .ix-section-count { font-family: var(--mono); font-size: 10px; letter-spacing: 0.2em; color: var(--gold); text-transform: uppercase; }
 .ix-empty { color: var(--ink-faint); font-style: italic; font-size: 13px; padding: 12px 0; }
-.ix-card { background: var(--paper-raised); border: 1px solid var(--rule); margin-bottom: 10px; }
+.ix-card { background: var(--paper-raised); border: 1px solid var(--rule); margin-bottom: 10px; cursor: pointer; transition: border-color 0.15s; }
+.ix-card:hover { border-color: var(--gold); }
 .ix-card-header { display: flex; align-items: baseline; justify-content: space-between; padding: 12px 16px 8px; border-bottom: 1px dotted var(--rule); }
 .ix-role { font-family: var(--serif-display); font-size: 16px; font-style: italic; color: var(--ink); }
 .ix-count { font-family: var(--mono); font-size: 13px; font-weight: 600; color: var(--blood-bright); }
@@ -1515,6 +1516,14 @@ function getTotalViews() {
 }
 function getSceneById(id) { return state.scenes.find(s => s.id === id); }
 function getCharacterByName(name) { return state.characters.find(c => c.name === name); }
+// For scenes with linkedChar, the character's actors[] is authoritative; fall back to scene.actors
+function getSceneActors(scene) {
+  if (scene && scene.linkedChar) {
+    const char = getCharacterByName(scene.linkedChar);
+    if (char && char.actors && char.actors.length > 0) return char.actors;
+  }
+  return scene ? scene.actors : [];
+}
 
 function getVisitNumMap() {
   const chronological = [...state.visits].sort(compareVisitsChrono);
@@ -3554,7 +3563,7 @@ function renderRoles() {
     if (filterType !== 'all' && s.type !== filterType) return false;
     if (!term) return true;
     if (s.role.toLowerCase().includes(term)) return true;
-    if (s.actors.some(a => a.toLowerCase().includes(term))) return true;
+    if (getSceneActors(s).some(a => a.toLowerCase().includes(term))) return true;
     return false;
   });
 
@@ -3568,12 +3577,13 @@ function renderRoles() {
 
   $('#rolesList').innerHTML = scenes.map(s => {
     const counts = sceneActorCounts[s.id] || {};
+    const actors = getSceneActors(s);
     return `
       <div class="role-summary" data-scene="${s.id}">
         <div class="role-name">${escapeHtml(s.role)}</div>
-        <div class="role-type">${s.type}${s.userAdded ? ' · 사용자' : ''}</div>
+        <div class="role-type">${s.type}${s.linkedChar ? ` · ${escapeHtml(s.linkedChar)}` : ''}${s.userAdded ? ' · 사용자' : ''}</div>
         <div class="role-actors">
-          ${s.actors.map(a => {
+          ${actors.map(a => {
             const c = counts[a] || 0;
             const tag = getActorTag(a);
             const dotHtml = tag ? `<span class="chip-dot" style="background: ${COLOR_VARS[tag]};"></span>` : '';
@@ -3659,7 +3669,7 @@ function renderInteractions() {
             return b.date.localeCompare(a.date);
           });
           return `
-            <div class="ix-card">
+            <div class="ix-card" data-scene="${scene.id}">
               <div class="ix-card-header">
                 <span class="ix-role">${escapeHtml(scene.role)}</span>
                 <span class="ix-count">×${occurrences.length}</span>
@@ -3683,6 +3693,10 @@ function renderInteractions() {
 
   if (!html.trim()) html = '<div style="padding:40px;text-align:center;color:var(--ink-faint);font-style:italic;">기록된 인터랙션이 없습니다</div>';
   $('#interactionsList').innerHTML = html;
+
+  $$('.ix-card').forEach(card => {
+    card.addEventListener('click', () => openRoleModal(card.dataset.scene));
+  });
 }
 
 $('#interactionSearch').addEventListener('input', renderInteractions);
@@ -4787,7 +4801,7 @@ function openRoleModal(sceneId) {
     </div>
     <div style="margin-bottom: 24px;">
       <div style="font-family: var(--mono); font-size: 10px; color: var(--gold); letter-spacing: 0.24em; text-transform: uppercase; margin-bottom: 8px;">배우별 받은 횟수</div>
-      ${scene.actors.map(a => {
+      ${getSceneActors(scene).map(a => {
         const c = byActor[a] || 0;
         const p = totalViews ? (c / totalViews * 100).toFixed(1) : '0.0';
         return `<div class="modal-history-item"><div class="who">${getActorDotHtml(a)}${escapeHtml(a)}</div><div class="when">${c} · ${p}%</div></div>`;
@@ -4800,7 +4814,7 @@ function openRoleModal(sceneId) {
     </div>
   `;
   $('#modalTitle').textContent = scene.role;
-  $('#modalSub').textContent = `${scene.type} · ${scene.actors.length} cast members`;
+  $('#modalSub').textContent = `${scene.type}${scene.linkedChar ? ' · ' + scene.linkedChar : ''} · ${getSceneActors(scene).length} cast members`;
   $('#modalContent').innerHTML = content;
   $('#modal').classList.add('open');
 }
