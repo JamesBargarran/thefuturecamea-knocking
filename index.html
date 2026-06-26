@@ -5578,7 +5578,8 @@ async function fetchSeedFromSupabase() {
       id: r.id, type: r.type, role: r.role, actors: r.actors || [],
       legacy_counts: r.legacy_counts || {},
       composedOf: r.composed_of || undefined, freeCombo: r.free_combo || undefined,
-      sortIdx: r.sort_idx, userAdded: r.user_added || false
+      sortIdx: r.sort_idx, userAdded: r.user_added || false,
+      linkedChar: r.linked_char || undefined
     })),
     performances: (perfs.data || []).map(r => ({
       id: r.id, date: r.date, matinee: r.matinee || '', perfNum: r.perf_num,
