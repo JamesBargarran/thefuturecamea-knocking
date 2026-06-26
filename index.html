@@ -1441,7 +1441,22 @@ function undoLast() {
 }
 
 let lastSaveTime = 0;
+let _sceneActorCountsCache = null;
+function getSceneActorCounts() {
+  if (_sceneActorCountsCache) return _sceneActorCountsCache;
+  const counts = {};
+  state.visits.forEach(v => {
+    v.entries.forEach(e => {
+      if (!counts[e.sceneId]) counts[e.sceneId] = {};
+      if (e.actor) counts[e.sceneId][e.actor] = (counts[e.sceneId][e.actor] || 0) + 1;
+    });
+  });
+  _sceneActorCountsCache = counts;
+  return counts;
+}
+
 function saveState() {
+  _sceneActorCountsCache = null;
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   lastSaveTime = Date.now();
   updateSaveIndicator();
@@ -3578,13 +3593,7 @@ function renderRoles() {
     return false;
   });
 
-  const sceneActorCounts = {};
-  state.visits.forEach(v => {
-    v.entries.forEach(e => {
-      if (!sceneActorCounts[e.sceneId]) sceneActorCounts[e.sceneId] = {};
-      sceneActorCounts[e.sceneId][e.actor] = (sceneActorCounts[e.sceneId][e.actor] || 0) + 1;
-    });
-  });
+  const sceneActorCounts = getSceneActorCounts();
 
   $('#rolesList').innerHTML = scenes.map(s => {
     const counts = sceneActorCounts[s.id] || {};
