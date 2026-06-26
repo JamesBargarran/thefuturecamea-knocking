@@ -1408,15 +1408,26 @@ function loadState() {
 // Undo history — keeps last N state snapshots for one-step undo
 const UNDO_STACK_SIZE = 20;
 const undoStack = [];
+function updateUndoBtn() {
+  const btn = $('#undoBtn');
+  if (!btn) return;
+  const top = undoStack[undoStack.length - 1];
+  btn.disabled = !top;
+  btn.style.opacity = top ? '1' : '0.35';
+  btn.style.cursor = top ? 'pointer' : 'default';
+  btn.title = top ? `되돌리기: ${top.label}` : '되돌릴 작업 없음';
+}
 function snapshotForUndo(label) {
   try {
     const snap = JSON.stringify(state);
     undoStack.push({ snap, label, when: Date.now() });
     if (undoStack.length > UNDO_STACK_SIZE) undoStack.shift();
   } catch (e) {}
+  updateUndoBtn();
 }
 function undoLast() {
   const last = undoStack.pop();
+  updateUndoBtn();
   if (!last) { showToast('되돌릴 작업이 없습니다'); return; }
   try {
     const restored = JSON.parse(last.snap);
@@ -6342,6 +6353,7 @@ if (SUPABASE_ENABLED) {
 bootApp();
 
 // Undo button + keyboard shortcut (Cmd/Ctrl+Z)
+updateUndoBtn();
 $('#undoBtn') && $('#undoBtn').addEventListener('click', undoLast);
 document.addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
