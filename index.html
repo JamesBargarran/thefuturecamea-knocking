@@ -3973,6 +3973,7 @@ function renderPoolEditor() {
         }
         saveState();
         queueCharacterPush(c.name, true);
+        propagateActorToLinkedScenes(c.name, name);
         renderPoolEditor();
         renderSelected(); renderCastingInputs();
         showToast(`${name} 추가됨`);
@@ -3997,6 +3998,7 @@ function renderPoolEditor() {
         }
         saveState();
         queueCharacterPush(c.name, true);
+        propagateActorToLinkedScenes(c.name, name);
         renderPoolEditor();
         renderSelected(); renderCastingInputs();
         showToast(`${name} 추가됨`);
@@ -4079,6 +4081,13 @@ function renderScenePool() {
               <button data-sp-action="add-existing">추가</button>
             </div>
           `}
+          <div style="margin-top: 10px; border-top: 1px dotted var(--rule); padding-top: 8px;">
+            <div style="font-family: var(--mono); font-size: 9px; letter-spacing: 0.2em; color: var(--ink-faint); text-transform: uppercase; margin-bottom: 4px;">연결 배역</div>
+            <select data-linked-char style="width: 100%; background: var(--paper-deep); border: 1px solid var(--rule); color: var(--ink); font-family: var(--serif-body); font-size: 12px; padding: 5px 8px;">
+              <option value="">— 없음 —</option>
+              ${allCharNames.map(cn => `<option value="${escapeHtml(cn)}"${s.linkedChar === cn ? ' selected' : ''}>${escapeHtml(cn)}</option>`).join('')}
+            </select>
+          </div>
         ` : `
           <div style="font-size: 11px; color: var(--ink-faint); font-style: italic; margin-top: 6px;">조합 장면의 배우 풀은 각 구성 캐릭터에서 자동으로 가져옵니다. 캐스팅 풀 편집 페이지에서 각 캐릭터의 풀을 관리하세요.</div>
         `}
@@ -4146,6 +4155,17 @@ function renderScenePool() {
         queueScenePush(scene.id);
         renderScenePool();
         showToast(`${name} 추가됨`);
+      });
+    }
+
+    const linkedCharSel = $('select[data-linked-char]', card);
+    if (linkedCharSel) {
+      linkedCharSel.addEventListener('change', () => {
+        const val = linkedCharSel.value;
+        if (val) scene.linkedChar = val;
+        else delete scene.linkedChar;
+        saveState();
+        queueScenePush(scene.id);
       });
     }
 
@@ -5515,7 +5535,8 @@ async function pushSeedToSupabase() {
     composed_of: s.composedOf || null,
     free_combo: s.freeCombo || null,
     sort_idx: s.sortIdx || 999,
-    user_added: false
+    user_added: false,
+    linked_char: s.linkedChar || null
   }));
   if (sceneRows.length > 0) {
     const { error } = await sb.from('scenes').upsert(sceneRows, { onConflict: 'id' });
@@ -5868,7 +5889,7 @@ async function _flushPushQueueInner() {
       const rows = []; const deletes = [];
       adminPushQueue.scenes.forEach(sid => {
         const s = state.scenes.find(x => x.id === sid);
-        if (s) rows.push({ id: s.id, type: s.type, role: s.role, actors: s.actors || [], legacy_counts: s.legacy_counts || {}, composed_of: s.composedOf || null, free_combo: s.freeCombo || null, sort_idx: s.sortIdx || 999, user_added: !!s.userAdded });
+        if (s) rows.push({ id: s.id, type: s.type, role: s.role, actors: s.actors || [], legacy_counts: s.legacy_counts || {}, composed_of: s.composedOf || null, free_combo: s.freeCombo || null, sort_idx: s.sortIdx || 999, user_added: !!s.userAdded, linked_char: s.linkedChar || null });
         else deletes.push(sid);
       });
       let ok = true;
@@ -5928,6 +5949,19 @@ function queueScenePush(sceneId) {
   adminPushQueue.scenes.add(sceneId);
   persistPushQueue();
   schedulePush();
+}
+function propagateActorToLinkedScenes(charName, actorName) {
+  let changed = false;
+  state.scenes.forEach(s => {
+    const isLinked = !s.composedOf && s.linkedChar === charName;
+    const isComposedWith = Array.isArray(s.composedOf) && s.composedOf.includes(charName);
+    if ((isLinked || isComposedWith) && !s.actors.includes(actorName)) {
+      s.actors.push(actorName);
+      queueScenePush(s.id);
+      changed = true;
+    }
+  });
+  if (changed) saveState();
 }
 function queuePerformancePush(perfId) {
   if (!sb || !currentUserIsAdmin) return;
