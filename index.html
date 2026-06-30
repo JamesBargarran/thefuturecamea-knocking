@@ -32,6 +32,7 @@
   --tag-azure: #5a8ec5; --tag-violet: #9b6dba; --tag-rose: #d27396; --tag-bone: #c8b89a;
 }
 
+html { overflow-x: hidden; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 html, body { background: var(--paper); color: var(--ink); font-family: var(--serif-body); font-size: 15px; line-height: 1.55; min-height: 100vh; -webkit-font-smoothing: antialiased; }
 body { background: radial-gradient(ellipse at top, rgba(139, 26, 26, 0.06), transparent 60%), radial-gradient(ellipse at bottom right, rgba(184, 155, 94, 0.04), transparent 50%), var(--paper); background-attachment: fixed; position: relative; }
 body::before { content: ''; position: fixed; inset: 0; background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.9 0 0 0 0 0.85 0 0 0 0 0.75 0 0 0 0.08 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); pointer-events: none; z-index: 100; opacity: 0.5; mix-blend-mode: overlay; }
@@ -413,6 +414,10 @@ body.role-guest .guest-readonly-note { display: block; }
   .pairing-query-row .when-was { padding: 8px 0; }
   /* Performer pool on tablets: allow narrower cards but keep date inputs contained */
   .pool-editor-list { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+  /* Tabs: horizontal scroll instead of wrapping into many rows on tablets/laptops */
+  nav { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+  nav::-webkit-scrollbar { display: none; }
+  .tab { white-space: nowrap; flex-shrink: 0; }
 }
 
 /* ===== TABLET / NARROW (≤600px) ===== */
@@ -461,6 +466,16 @@ body.role-guest .guest-readonly-note { display: block; }
   .title-block h1 { font-size: 32px; }
   .counter-num { font-size: 40px; }
   .section-title { font-size: 22px; }
+  /* Prevent iOS auto-zoom on input focus (font-size must be >= 16px) */
+  .field input, .field textarea, .field select,
+  .scene-filter input, .history-controls input, .history-controls select,
+  .bulk-editor select, .auth-form input,
+  .pool-add-row input, .pool-add-row select { font-size: 16px; }
+  /* Bulk editor select: never overflow narrow screens */
+  .bulk-editor select { min-width: 0; width: 100%; }
+  /* User chip: wrap & truncate long emails so the header never overflows */
+  .user-chip { flex-wrap: wrap; justify-content: flex-end; }
+  .user-chip #userEmail { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 }
 
 /* ===== PHONE (≤430px) ===== */
@@ -478,6 +493,8 @@ body.role-guest .guest-readonly-note { display: block; }
   .stats-grid { grid-template-columns: 1fr 1fr; gap: 8px; }
   .stat-card { min-width: 0; padding: 14px 12px; }
   .stat-num { font-size: 28px; }
+  /* Single-column for wide card grids on very small phones (prevents card overflow) */
+  .casting-tracker-grid, .scene-pool-grid, .role-grid { grid-template-columns: 1fr; }
 }
 
 ::-webkit-scrollbar { width: 8px; height: 8px; }
@@ -2083,12 +2100,10 @@ function applyVisitSelectorChange() {
   if (!v) return;
   $('#visitDate').value = v.date || '';
   $('#visitMatinee').value = v.matinee || '';
-  // Don't overwrite notes if user already typed; merge on save
-  // But pre-fill if empty
-  if (!$('#visitNotes').value.trim()) {
-    // Leave empty so user types their loop notes; existing visit notes shown as placeholder
-    $('#visitNotes').placeholder = v.notes ? `기존 메모: ${v.notes}` : '';
-  }
+  // Clear the notes field and show the visit's existing note as a placeholder, so a note
+  // typed for a different selection doesn't carry over to this visit.
+  $('#visitNotes').value = '';
+  $('#visitNotes').placeholder = v.notes ? `기존 메모: ${v.notes}` : '';
   // Auto-load this visit's casting so it's editable / visible in the Record tab.
   // Combine seed/performance casting with the user's personal overrides.
   const baseCasting = v.seedCasting || v.casting || {};
@@ -3371,13 +3386,15 @@ function getPerformerStats(scope = 'performances') {
 
 function getActorStats(filterType = 'all', scope = 'watched') {
   // For backward-compat: returns counts from encounters (not casting). Used by 'Cast' stats page.
-  const totalViews = scope === 'watched' ? getWatchedCount() : getPerformanceCount();
   const counts = {};
-  state.visits.filter(v => {
+  // Tally only the visits we actually count, so the "per visit" probability denominator
+  // matches the same population as the numerator (fixes Manderley/legacy mismatch).
+  const countedVisits = state.visits.filter(v => {
     if (v.isLegacy) return false;
     if (scope === 'watched') return !!v.isWatched;
     return true;
-  }).forEach(visit => {
+  });
+  countedVisits.forEach(visit => {
     visit.entries.forEach(e => {
       const scene = getSceneById(e.sceneId);
       if (!scene) return;
@@ -3386,6 +3403,7 @@ function getActorStats(filterType = 'all', scope = 'watched') {
       actors.forEach(a => { counts[a] = (counts[a] || 0) + 1; });
     });
   });
+  const totalViews = countedVisits.length;
   return { counts, totalViews };
 }
 
@@ -3984,11 +4002,35 @@ $('#bulkVisitSelect').addEventListener('change', (e) => {
 });
 
 $('#bulkSave').addEventListener('click', () => {
+  if (guardGuest()) return;
   if (!bulkCurrentVisitId) { showToast('회차를 선택하세요'); return; }
   const v = state.visits.find(x => x.id === bulkCurrentVisitId);
   if (!v) return;
-  v.casting = { ...bulkCurrentCasting };
+  snapshotForUndo(`#${getVisitNumMap()[bulkCurrentVisitId] || ''} 일괄 캐스팅 저장`);
+  const isSeedPerf = v.id && v.id.startsWith('perf_') && !v.userAdded;
+  if (isSeedPerf && !currentUserIsAdmin) {
+    // Regular user editing a seed performance -> keep official casting, store only changed roles as personal override
+    if (!('seedCasting' in v)) v.seedCasting = { ...(v.casting || {}) };
+    const base = v.seedCasting || {};
+    const changed = {};
+    Object.keys(bulkCurrentCasting).forEach(role => {
+      if (bulkCurrentCasting[role] !== base[role]) changed[role] = bulkCurrentCasting[role];
+    });
+    v.userCasting = { ...changed };
+    v.casting = { ...base, ...v.userCasting };
+  } else {
+    v.casting = { ...bulkCurrentCasting };
+  }
+  touchVisit(v);
   saveState();
+  // Cloud sync: user-added/non-seed visit -> added-visits table; seed perf -> admin perf push (admin) or personal visit-state (regular user)
+  if (v.userAdded || (v.id && !v.id.startsWith('perf_'))) {
+    queueAddedVisitPush(v.id);
+  } else if (currentUserIsAdmin) {
+    queuePerformancePush(v.id);
+  } else {
+    queueVisitStatePush(v.id);
+  }
   showToast(`#${getVisitNumMap()[bulkCurrentVisitId]} 캐스팅 저장됨`);
   renderBulkEditor();
 });
@@ -4776,7 +4818,7 @@ function openActorModal(actor) {
   ` : '';
 
   const content = `
-    <div style="display: flex; gap: 24px; margin-bottom: 24px; padding: 16px; background: var(--paper-raised); border: 1px solid var(--rule);">
+    <div style="display: flex; flex-wrap: wrap; gap: 24px; margin-bottom: 24px; padding: 16px; background: var(--paper-raised); border: 1px solid var(--rule);">
       <div><div style="font-family: var(--mono); font-size: 9px; color: var(--gold); letter-spacing: 0.2em;">총 만남</div><div style="font-family: var(--serif-display); font-size: 28px; font-style: italic;">${count}</div></div>
       <div><div style="font-family: var(--mono); font-size: 9px; color: var(--gold); letter-spacing: 0.2em;">만날 확률</div><div style="font-family: var(--serif-display); font-size: 28px; font-style: italic;">${prob}%</div></div>
       <div><div style="font-family: var(--mono); font-size: 9px; color: var(--gold); letter-spacing: 0.2em;">고유 배역</div><div style="font-family: var(--serif-display); font-size: 28px; font-style: italic;">${new Set(encounters.map(e => e.scene && e.scene.id).filter(Boolean)).size}</div></div>
@@ -4822,7 +4864,7 @@ function openRoleModal(sceneId) {
   const allActors = [...poolActors, ...extraActors];
 
   const content = `
-    <div style="display: flex; gap: 24px; margin-bottom: 24px; padding: 16px; background: var(--paper-raised); border: 1px solid var(--rule);">
+    <div style="display: flex; flex-wrap: wrap; gap: 24px; margin-bottom: 24px; padding: 16px; background: var(--paper-raised); border: 1px solid var(--rule);">
       <div><div style="font-family: var(--mono); font-size: 9px; color: var(--gold); letter-spacing: 0.2em;">총 관극</div><div style="font-family: var(--serif-display); font-size: 28px; font-style: italic;">${count}</div></div>
       <div><div style="font-family: var(--mono); font-size: 9px; color: var(--gold); letter-spacing: 0.2em;">받을 확률</div><div style="font-family: var(--serif-display); font-size: 28px; font-style: italic;">${prob}%</div></div>
     </div>
@@ -5661,7 +5703,6 @@ function updateUserChip() {
     chip.innerHTML = `
       <span id="userEmail">${currentUser.email || ''}</span>
       ${currentUserIsAdmin ? '<span class="badge-admin">ADMIN</span>' : ''}
-      <span id="saveIndicator" style="font-size:9px; letter-spacing:0.1em; color:var(--ink-faint); opacity:0.5; transition:opacity 0.3s;"></span>
       <button id="logoutBtn" type="button">로그아웃</button>
     `;
     document.getElementById('logoutBtn')?.addEventListener('click', handleLogout);
