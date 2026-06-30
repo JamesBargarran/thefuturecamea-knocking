@@ -112,11 +112,11 @@ h2.section-title { font-family: var(--serif-display); font-size: 36px; font-weig
 .casting-record h4 { font-family: var(--mono); font-size: 10px; letter-spacing: 0.24em; text-transform: uppercase; color: var(--gold); margin-bottom: 6px; }
 .casting-record .hint { font-size: 12px; color: var(--ink-faint); font-style: italic; margin-bottom: 14px; }
 .casting-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
-.casting-cell { background: var(--paper-deep); border: 1px solid var(--rule); padding: 10px 12px; transition: border-color 0.15s, background 0.15s; }
+.casting-cell { background: var(--paper-deep); border: 1px solid var(--rule); padding: 10px 12px; transition: border-color 0.15s, background 0.15s; min-width: 0; }
 .casting-cell.is-filled { border-color: var(--gold-dim); background: rgba(184, 155, 94, 0.06); }
 .casting-cell .fill-check { color: var(--gold); font-size: 12px; margin-left: 4px; }
 .casting-cell .char-name { font-family: var(--serif-display); font-size: 15px; font-style: italic; margin-bottom: 6px; color: var(--ink); }
-.casting-cell select { width: 100%; background: var(--paper); border: 1px solid var(--rule); color: var(--ink); font-family: var(--serif-body); padding: 6px 8px; font-size: 12px; }
+.casting-cell select { width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box; background: var(--paper); border: 1px solid var(--rule); color: var(--ink); font-family: var(--serif-body); padding: 6px 8px; font-size: 12px; }
 .casting-cell select:focus { outline: none; border-color: var(--gold); }
 .casting-cell .actor-meta-hint { font-family: var(--mono); font-size: 10px; color: var(--ink-faint); margin-top: 4px; letter-spacing: 0.1em; }
 
@@ -250,7 +250,7 @@ body.role-guest .guest-readonly-note { display: block; }
 
 .bulk-editor { background: var(--paper-raised); border: 1px solid var(--rule); padding: 24px; margin-bottom: 24px; }
 .bulk-editor .bulk-header { display: flex; gap: 12px; align-items: center; margin-bottom: 20px; flex-wrap: wrap; }
-.bulk-editor select { background: var(--paper-deep); border: 1px solid var(--rule); color: var(--ink); font-family: var(--serif-body); padding: 10px 14px; font-size: 14px; min-width: 280px; }
+.bulk-editor .bulk-header select { background: var(--paper-deep); border: 1px solid var(--rule); color: var(--ink); font-family: var(--serif-body); padding: 10px 14px; font-size: 14px; min-width: 240px; max-width: 100%; }
 .bulk-editor select:focus { outline: none; border-color: var(--gold); }
 .bulk-editor .bulk-info { font-family: var(--mono); font-size: 11px; color: var(--ink-faint); letter-spacing: 0.15em; }
 .bulk-actions { display: flex; gap: 10px; margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--rule); }
@@ -469,10 +469,10 @@ body.role-guest .guest-readonly-note { display: block; }
   /* Prevent iOS auto-zoom on input focus (font-size must be >= 16px) */
   .field input, .field textarea, .field select,
   .scene-filter input, .history-controls input, .history-controls select,
-  .bulk-editor select, .auth-form input,
+  .bulk-editor .bulk-header select, .casting-cell select, .auth-form input,
   .pool-add-row input, .pool-add-row select { font-size: 16px; }
-  /* Bulk editor select: never overflow narrow screens */
-  .bulk-editor select { min-width: 0; width: 100%; }
+  /* Bulk editor header select: never overflow narrow screens */
+  .bulk-editor .bulk-header select { min-width: 0; width: 100%; }
   /* User chip: wrap & truncate long emails so the header never overflows */
   .user-chip { flex-wrap: wrap; justify-content: flex-end; }
   .user-chip #userEmail { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
