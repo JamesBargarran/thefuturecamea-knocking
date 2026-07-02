@@ -703,6 +703,12 @@ body.role-guest .guest-readonly-note { display: block; }
       </div>
       <div>
         <label style="display: block; font-family: var(--mono); font-size: 10px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--ink-dim); margin-bottom: 8px;">캐스팅 (선택, 나중에 편집 가능)</label>
+        <div class="team-bulk-bar" style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:10px;">
+          <span style="font-family:var(--mono); font-size:9px; letter-spacing:0.15em; color:var(--ink-faint); text-transform:uppercase;">팀 일괄 채우기</span>
+          <button type="button" id="newPerfTeamPink" class="team-bulk-btn team-bulk-pink">Pink팀 적용</button>
+          <button type="button" id="newPerfTeamBlue" class="team-bulk-btn team-bulk-blue">Blue팀 적용</button>
+          <button type="button" id="newPerfTeamClear" class="team-bulk-btn">전체 비우기</button>
+        </div>
         <div class="casting-grid" id="newPerfCasting"></div>
       </div>
       <div style="display: flex; gap: 10px; margin-top: 16px;">
@@ -840,6 +846,11 @@ body.role-guest .guest-readonly-note { display: block; }
         <div class="bulk-header">
           <select id="bulkVisitSelect"><option value="">— 회차 선택 —</option></select>
           <div class="bulk-info" id="bulkVisitInfo"></div>
+        </div>
+        <div class="team-bulk-bar" style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:12px;">
+          <span style="font-family:var(--mono); font-size:9px; letter-spacing:0.15em; color:var(--ink-faint); text-transform:uppercase;">팀 일괄 채우기</span>
+          <button type="button" id="bulkTeamPink" class="team-bulk-btn team-bulk-pink">Pink팀 적용</button>
+          <button type="button" id="bulkTeamBlue" class="team-bulk-btn team-bulk-blue">Blue팀 적용</button>
         </div>
         <div class="casting-grid" id="bulkCastingInputs"></div>
         <div class="bulk-actions">
@@ -1968,43 +1979,134 @@ function renderSelected() {
   });
 }
 
+// ===== Shared casting-entry helpers (replacement slots + team fill + watched popup) =====
+let currentCastingSlots = {}; // Record "오늘의 캐스팅": { charName: [actor, ...] }  (2+ slots = 교체)
+function attrValEsc(v) { return String(v).replace(/(["\\])/g, '\\$1'); }
+function valueToSlots(v) { return v ? String(v).split(' → ').map(s => s.trim()) : ['']; }
+function slotsToValue(arr) { return (arr || []).map(s => (s || '').trim()).filter(Boolean).join(' → '); }
+function readSlotsByAttr(attr, char) {
+  return Array.from(document.querySelectorAll(`select[${attr}="${attrValEsc(char)}"]`)).map(s => s.value);
+}
+function teamRegularCandidates(charName, team) {
+  const c = getCharacterByName(charName);
+  const meta = (c && c.actorMeta) || {};
+  return ((c && c.actors) || []).filter(a => {
+    const m = meta[a] || {};
+    return m.status === 'Regular' && m.team === team && m.availability !== 'Checked Out';
+  });
+}
+function castingOptionsHtml(charName, selected) {
+  const c = getCharacterByName(charName);
+  const actors = c ? sortActorsForCasting(charName, c.actors) : [];
+  return actors.map(a => {
+    const m = (c && c.actorMeta && c.actorMeta[a]) || {};
+    let label = m.subName ? `${a} (${m.subName})` : a;
+    if (m.team) label += ` [${m.team}]`;
+    if (m.availability === 'Checked Out') label += ' ✱CO';
+    return `<option value="${escapeHtml(a)}" ${a === selected ? 'selected' : ''}>${escapeHtml(label)}</option>`;
+  }).join('');
+}
+// One character cell body with N replacement slots (교체). attrPrefix: 'rec' | 'bulk'
+function castingSlotCellHtml(charName, slots, attrPrefix) {
+  const list = (slots && slots.length) ? slots : [''];
+  const rows = list.map((cur, si) => `
+        <div style="display:flex; gap:4px; align-items:center; margin-bottom:4px;">
+          <select data-${attrPrefix}-char="${escapeHtml(charName)}" data-slot="${si}" style="flex:1; min-width:0;">
+            <option value="">— 선택 —</option>
+            ${castingOptionsHtml(charName, cur)}
+          </select>
+          ${si > 0 ? `<button type="button" data-${attrPrefix}-remove="${escapeHtml(charName)}" data-slot="${si}" title="이 교체 제거" style="background:none;border:1px solid var(--rule);color:var(--ink-faint);cursor:pointer;font-size:11px;padding:2px 6px;line-height:1;flex:0 0 auto;">×</button>` : ''}
+        </div>
+        ${si < list.length - 1 ? '<div style="font-family:var(--mono);font-size:9px;color:var(--blood-bright);letter-spacing:0.15em;text-align:center;margin:2px 0;">↓ 교체</div>' : ''}`).join('');
+  return `${rows}
+        <button type="button" data-${attrPrefix}-add="${escapeHtml(charName)}" style="background:transparent;border:1px dashed var(--rule);color:var(--ink-faint);font-family:var(--mono);font-size:9px;letter-spacing:0.15em;padding:3px 8px;margin-top:4px;cursor:pointer;width:100%;">+ 교체 추가</button>`;
+}
+function syncCurrentCasting() {
+  currentCasting = {};
+  Object.keys(currentCastingSlots).forEach(ch => {
+    const v = slotsToValue(currentCastingSlots[ch]);
+    if (v) currentCasting[ch] = v;
+  });
+}
+function loadCurrentCastingSlots() {
+  currentCastingSlots = {};
+  Object.keys(currentCasting || {}).forEach(ch => { currentCastingSlots[ch] = valueToSlots(currentCasting[ch]); });
+}
+function updateCastingProgress() {
+  const prog = $('#castingProgress'); if (!prog) return;
+  const filled = state.characters.filter(c => (currentCastingSlots[c.name] || []).some(Boolean)).length;
+  prog.textContent = `${filled} / ${state.characters.length}`;
+}
+// 관극 확인 팝업: resolves 'watched' | 'unwatched' | 'cancel'
+function askWatched() {
+  return new Promise(resolve => {
+    const back = document.createElement('div');
+    back.className = 'modal-backdrop open';
+    back.style.zIndex = '400';
+    back.innerHTML = `
+      <div class="modal" style="max-width:440px; text-align:center;">
+        <h3 style="margin-bottom:6px;">이 회차를 관극하셨나요?</h3>
+        <div class="modal-sub">관극 여부에 따라 통계에 반영됩니다</div>
+        <div style="display:flex; gap:12px; justify-content:center; flex-wrap:wrap; margin-top:8px;">
+          <button type="button" class="btn" style="width:auto; padding:14px 30px;" data-ans="watched">관극함</button>
+          <button type="button" class="btn ghost" style="width:auto; padding:14px 30px;" data-ans="unwatched">기록만</button>
+        </div>
+        <div style="margin-top:14px; font-size:12px; color:var(--ink-faint); font-style:italic;">창 바깥 클릭 또는 ESC = 취소</div>
+      </div>`;
+    document.body.appendChild(back);
+    let done = false;
+    function finish(val) {
+      if (done) return; done = true;
+      document.removeEventListener('keydown', onKey);
+      back.remove();
+      resolve(val);
+    }
+    function onKey(e) { if (e.key === 'Escape') finish('cancel'); }
+    back.addEventListener('click', (e) => { if (e.target === back) finish('cancel'); });
+    back.querySelectorAll('[data-ans]').forEach(b => b.addEventListener('click', () => finish(b.dataset.ans)));
+    document.addEventListener('keydown', onKey);
+  });
+}
+
 function renderCastingInputs() {
   const wrap = $('#castingInputs');
-  const total = state.characters.length;
-  const filledCount = state.characters.filter(c => currentCasting[c.name]).length;
   wrap.innerHTML = state.characters.map(c => {
-    const currentActor = currentCasting[c.name];
-    const meta = currentActor ? getActorMeta(c.name, currentActor) : null;
+    const slots = (currentCastingSlots[c.name] && currentCastingSlots[c.name].length) ? currentCastingSlots[c.name] : [''];
+    const primary = slots.filter(Boolean)[0] || '';
+    const isFilled = slots.some(Boolean);
+    const meta = primary ? getActorMeta(c.name, primary) : null;
     const metaHint = meta ? (meta.subName ? meta.subName + ' · ' : '') + (meta.status || '') : '';
-    const isFilled = !!currentActor;
     return `
-      <div class="casting-cell${isFilled ? ' is-filled' : ''}">
+      <div class="casting-cell${isFilled ? ' is-filled' : ''}" data-rec-cell="${escapeHtml(c.name)}">
         <div class="char-name">${escapeHtml(c.name)}${isFilled ? ' <span class="fill-check">✓</span>' : ''}</div>
-        <select data-char="${escapeHtml(c.name)}">
-          <option value="">— 선택 —</option>
-          ${sortActorsForCasting(c.name, c.actors).map(a => {
-            const m = (c.actorMeta && c.actorMeta[a]) || {};
-            let label = m.subName ? `${a} (${m.subName})` : a;
-            if (m.team) label += ` [${m.team}]`;
-            if (m.availability === 'Checked Out') label += ' ✱CO';
-            return `<option value="${escapeHtml(a)}" ${currentActor === a ? 'selected' : ''}>${escapeHtml(label)}</option>`;
-          }).join('')}
-        </select>
+        ${castingSlotCellHtml(c.name, slots, 'rec')}
         ${metaHint ? `<div class="actor-meta-hint">${escapeHtml(metaHint)}</div>` : ''}
-      </div>
-    `;
+      </div>`;
   }).join('');
-  // Update progress counter if present
-  const prog = $('#castingProgress');
-  if (prog) prog.textContent = `${filledCount} / ${total}`;
-  $$('#castingInputs select').forEach(sel => {
-    sel.addEventListener('change', (e) => {
-      const char = e.target.dataset.char;
-      if (e.target.value) currentCasting[char] = e.target.value;
-      else delete currentCasting[char];
-      renderCastingInputs();
-    });
-  });
+  updateCastingProgress();
+  $$('#castingInputs select[data-rec-char]').forEach(sel => sel.addEventListener('change', () => {
+    const char = sel.dataset.recChar;
+    currentCastingSlots[char] = readSlotsByAttr('data-rec-char', char);
+    syncCurrentCasting();
+    const cell = sel.closest('[data-rec-cell]');
+    if (cell) cell.classList.toggle('is-filled', (currentCastingSlots[char] || []).some(Boolean));
+    updateCastingProgress();
+  }));
+  $$('#castingInputs [data-rec-add]').forEach(btn => btn.addEventListener('click', () => {
+    const char = btn.dataset.recAdd;
+    const cur = (currentCastingSlots[char] && currentCastingSlots[char].length) ? currentCastingSlots[char].slice() : [''];
+    cur.push('');
+    currentCastingSlots[char] = cur;
+    renderCastingInputs();
+  }));
+  $$('#castingInputs [data-rec-remove]').forEach(btn => btn.addEventListener('click', () => {
+    const char = btn.dataset.recRemove, slot = parseInt(btn.dataset.slot);
+    const cur = (currentCastingSlots[char] || ['']).slice();
+    cur.splice(slot, 1);
+    currentCastingSlots[char] = cur.length ? cur : [''];
+    syncCurrentCasting();
+    renderCastingInputs();
+  }));
 }
 
 // Fill casting with all Regular actors of a given team (Pink/Blue).
@@ -2013,14 +2115,9 @@ function renderCastingInputs() {
 function applyTeamBulkFill(team) {
   let filled = 0, skipped = 0, ambiguous = [];
   state.characters.forEach(c => {
-    const meta = c.actorMeta || {};
-    // Candidates: actors who are Regular AND on this team AND not checked out
-    const candidates = (c.actors || []).filter(a => {
-      const m = meta[a] || {};
-      return m.status === 'Regular' && m.team === team && m.availability !== 'Checked Out';
-    });
+    const candidates = teamRegularCandidates(c.name, team);
     if (candidates.length === 1) {
-      currentCasting[c.name] = candidates[0];
+      currentCastingSlots[c.name] = [candidates[0]];
       filled++;
     } else if (candidates.length === 0) {
       skipped++;
@@ -2028,6 +2125,7 @@ function applyTeamBulkFill(team) {
       ambiguous.push(c.name);
     }
   });
+  syncCurrentCasting();
   renderCastingInputs();
   let msg = `${team}팀 Regular ${filled}개 배역 채움`;
   if (ambiguous.length) msg += ` · 복수 후보 ${ambiguous.length}개(수동 선택 필요)`;
@@ -2040,7 +2138,8 @@ function applyTeamBulkFill(team) {
     if (e.target && e.target.id === 'bulkPink') { applyTeamBulkFill('Pink'); }
     else if (e.target && e.target.id === 'bulkBlue') { applyTeamBulkFill('Blue'); }
     else if (e.target && e.target.id === 'bulkClear') {
-      Object.keys(currentCasting).forEach(k => delete currentCasting[k]);
+      currentCastingSlots = {};
+      syncCurrentCasting();
       renderCastingInputs();
       showToast('캐스팅 전체 비움');
     }
@@ -2091,6 +2190,7 @@ function applyVisitSelectorChange() {
     $('#visitMatinee').disabled = false;
     // Fresh entry → clear any loaded casting and encounters
     currentCasting = {};
+    currentCastingSlots = {};
     selectedScenes = [];
     renderSelected();
     renderCastingInputs();
@@ -2109,6 +2209,7 @@ function applyVisitSelectorChange() {
   const baseCasting = v.seedCasting || v.casting || {};
   const userOverride = v.userCasting || {};
   currentCasting = { ...baseCasting, ...userOverride };
+  loadCurrentCastingSlots();
   renderCastingInputs();
   // Load already-recorded encounters into the editor so they're visible and
   // can be edited/removed without creating duplicates on save.
@@ -2130,11 +2231,14 @@ function applyVisitSelectorChange() {
 
 $('#visitSelector') && $('#visitSelector').addEventListener('change', applyVisitSelectorChange);
 
-$('#saveVisit').addEventListener('click', () => {
+$('#saveVisit').addEventListener('click', async () => {
   if (guardGuest()) return;
   if (selectedScenes.length === 0 && Object.keys(currentCasting).length === 0) {
     showToast('장면 또는 캐스팅을 입력하세요'); return;
   }
+  const watchAns = await askWatched();
+  if (watchAns === 'cancel') return;
+  const watched = (watchAns === 'watched');
   const visitChoice = $('#visitSelector').value;
   const date = $('#visitDate').value;
   const matinee = $('#visitMatinee').value;
@@ -2162,7 +2266,7 @@ $('#saveVisit').addEventListener('click', () => {
       entries,
       casting: { ...currentCasting },
       isLegacy: false,
-      isWatched: true,
+      isWatched: watched,
       userAdded: true,
       source: 'user_visit',
       createdAt: now,
@@ -2170,7 +2274,7 @@ $('#saveVisit').addEventListener('click', () => {
     };
     state.visits.push(visit);
     queueAddedVisitPush(visit.id);
-    showToast('신규 회차로 기록되었습니다');
+    showToast(watched ? '신규 회차로 관극 기록됨' : '신규 회차로 기록만 저장됨');
   } else {
     // Append entries to an existing visit (and mark as watched)
     const v = state.visits.find(x => x.id === visitChoice);
@@ -2203,7 +2307,7 @@ $('#saveVisit').addEventListener('click', () => {
       v.userNotes = v.userNotes ? `${v.userNotes} · ${notes}` : notes;
       v.notes = composeNotes(v);
     }
-    v.isWatched = true;
+    v.isWatched = watched;
     touchVisit(v);
     if (v.userAdded || (v.id && !v.id.startsWith('perf_'))) {
       queueAddedVisitPush(v.id);
@@ -2214,7 +2318,7 @@ $('#saveVisit').addEventListener('click', () => {
   }
 
   saveState();
-  selectedScenes = []; currentCasting = {};
+  selectedScenes = []; currentCasting = {}; currentCastingSlots = {};
   $('#visitNotes').value = '';
   $('#visitNotes').placeholder = '';
   $('#visitSelector').value = '__new__';
@@ -2229,7 +2333,7 @@ $('#saveVisit').addEventListener('click', () => {
 $('#clearForm').addEventListener('click', () => {
   if (selectedScenes.length === 0 && !$('#visitNotes').value && Object.keys(currentCasting).length === 0) return;
   if (confirm('현재 입력을 모두 비울까요?')) {
-    selectedScenes = []; currentCasting = {};
+    selectedScenes = []; currentCasting = {}; currentCastingSlots = {};
     $('#visitNotes').value = '';
     $('#visitNotes').placeholder = '';
     $('#visitDate').value = new Date().toISOString().slice(0, 10);
@@ -3263,6 +3367,20 @@ $('#cancelNewPerf').addEventListener('click', () => {
   newPerfReplacements = {};
 });
 
+function applyTeamBulkFillNewPerf(team) {
+  let filled = 0, ambiguous = [];
+  state.characters.forEach(c => {
+    const cands = teamRegularCandidates(c.name, team);
+    if (cands.length === 1) { newPerfReplacements[c.name] = [cands[0]]; filled++; }
+    else if (cands.length > 1) ambiguous.push(c.name);
+  });
+  renderNewPerfCastingInputs();
+  showToast(`${team}팀 Regular ${filled}개 채움` + (ambiguous.length ? ` · 복수 후보 ${ambiguous.length}개` : ''));
+}
+$('#newPerfTeamPink') && $('#newPerfTeamPink').addEventListener('click', () => applyTeamBulkFillNewPerf('Pink'));
+$('#newPerfTeamBlue') && $('#newPerfTeamBlue').addEventListener('click', () => applyTeamBulkFillNewPerf('Blue'));
+$('#newPerfTeamClear') && $('#newPerfTeamClear').addEventListener('click', () => { newPerfReplacements = {}; renderNewPerfCastingInputs(); showToast('캐스팅 전체 비움'); });
+
 $('#confirmNewPerf').addEventListener('click', () => {
   const date = $('#newPerfDate').value;
   const matinee = $('#newPerfMatinee').value;
@@ -3936,6 +4054,7 @@ $('#castingSort').addEventListener('change', renderCastingTracker);
 // BULK EDITOR
 let bulkCurrentVisitId = null;
 let bulkCurrentCasting = {};
+let bulkCastingSlots = {};
 
 function renderBulkEditor() {
   const sel = $('#bulkVisitSelect');
@@ -3962,6 +4081,8 @@ function loadBulkVisit(visitId) {
   if (!v) return;
   bulkCurrentVisitId = visitId;
   bulkCurrentCasting = { ...(v.casting || {}) };
+  bulkCastingSlots = {};
+  Object.keys(bulkCurrentCasting).forEach(ch => { bulkCastingSlots[ch] = valueToSlots(bulkCurrentCasting[ch]); });
   const numMap = getVisitNumMap();
   $('#bulkVisitInfo').textContent = `#${numMap[visitId]} · ${v.date || '날짜 없음'} · ${v.entries.length} encounters`;
   renderBulkInputs();
@@ -3969,26 +4090,52 @@ function loadBulkVisit(visitId) {
 
 function renderBulkInputs() {
   const wrap = $('#bulkCastingInputs');
-  wrap.innerHTML = state.characters.map(c => `
-    <div class="casting-cell">
+  wrap.innerHTML = state.characters.map(c => {
+    const slots = (bulkCastingSlots[c.name] && bulkCastingSlots[c.name].length) ? bulkCastingSlots[c.name] : [''];
+    return `
+    <div class="casting-cell" data-bulk-cell="${escapeHtml(c.name)}">
       <div class="char-name">${escapeHtml(c.name)}</div>
-      <select data-bulk-char="${escapeHtml(c.name)}">
-        <option value="">— 선택 —</option>
-        ${c.actors.map(a => {
-          const m = c.actorMeta && c.actorMeta[a];
-          const label = m && m.subName ? `${a} (${m.subName})` : a;
-          return `<option value="${escapeHtml(a)}" ${bulkCurrentCasting[c.name] === a ? 'selected' : ''}>${escapeHtml(label)}</option>`;
-        }).join('')}
-      </select>
-    </div>
-  `).join('');
-  $$('[data-bulk-char]').forEach(sel => {
-    sel.addEventListener('change', (e) => {
-      const char = e.target.dataset.bulkChar;
-      if (e.target.value) bulkCurrentCasting[char] = e.target.value;
-      else delete bulkCurrentCasting[char];
-    });
+      ${castingSlotCellHtml(c.name, slots, 'bulk')}
+    </div>`;
+  }).join('');
+  $$('#bulkCastingInputs select[data-bulk-char]').forEach(sel => sel.addEventListener('change', () => {
+    const char = sel.dataset.bulkChar;
+    bulkCastingSlots[char] = readSlotsByAttr('data-bulk-char', char);
+    syncBulkCasting();
+  }));
+  $$('#bulkCastingInputs [data-bulk-add]').forEach(btn => btn.addEventListener('click', () => {
+    const char = btn.dataset.bulkAdd;
+    const cur = (bulkCastingSlots[char] && bulkCastingSlots[char].length) ? bulkCastingSlots[char].slice() : [''];
+    cur.push('');
+    bulkCastingSlots[char] = cur;
+    renderBulkInputs();
+  }));
+  $$('#bulkCastingInputs [data-bulk-remove]').forEach(btn => btn.addEventListener('click', () => {
+    const char = btn.dataset.bulkRemove, slot = parseInt(btn.dataset.slot);
+    const cur = (bulkCastingSlots[char] || ['']).slice();
+    cur.splice(slot, 1);
+    bulkCastingSlots[char] = cur.length ? cur : [''];
+    syncBulkCasting();
+    renderBulkInputs();
+  }));
+}
+function syncBulkCasting() {
+  bulkCurrentCasting = {};
+  Object.keys(bulkCastingSlots).forEach(ch => {
+    const v = slotsToValue(bulkCastingSlots[ch]);
+    if (v) bulkCurrentCasting[ch] = v;
   });
+}
+function applyTeamBulkFillBulk(team) {
+  let filled = 0, ambiguous = [];
+  state.characters.forEach(c => {
+    const cands = teamRegularCandidates(c.name, team);
+    if (cands.length === 1) { bulkCastingSlots[c.name] = [cands[0]]; filled++; }
+    else if (cands.length > 1) ambiguous.push(c.name);
+  });
+  syncBulkCasting();
+  renderBulkInputs();
+  showToast(`${team}팀 Regular ${filled}개 채움` + (ambiguous.length ? ` · 복수 후보 ${ambiguous.length}개` : ''));
 }
 
 $('#bulkVisitSelect').addEventListener('change', (e) => {
@@ -3996,6 +4143,7 @@ $('#bulkVisitSelect').addEventListener('change', (e) => {
   else {
     bulkCurrentVisitId = null;
     bulkCurrentCasting = {};
+    bulkCastingSlots = {};
     $('#bulkCastingInputs').innerHTML = '<div style="color: var(--ink-faint); padding: 20px; font-style: italic; grid-column: 1 / -1;">먼저 회차를 선택하세요.</div>';
     $('#bulkVisitInfo').textContent = '';
   }
@@ -4039,9 +4187,12 @@ $('#bulkClearAll').addEventListener('click', () => {
   if (!bulkCurrentVisitId) return;
   if (confirm('이 회차의 모든 캐스팅 정보를 비울까요?')) {
     bulkCurrentCasting = {};
+    bulkCastingSlots = {};
     renderBulkInputs();
   }
 });
+$('#bulkTeamPink') && $('#bulkTeamPink').addEventListener('click', () => { if (!bulkCurrentVisitId) { showToast('회차를 선택하세요'); return; } applyTeamBulkFillBulk('Pink'); });
+$('#bulkTeamBlue') && $('#bulkTeamBlue').addEventListener('click', () => { if (!bulkCurrentVisitId) { showToast('회차를 선택하세요'); return; } applyTeamBulkFillBulk('Blue'); });
 
 // POOL EDITOR (cast characters) - with dropdown add mode
 const poolAddMode = {}; // {charIdx: 'manual'|'dropdown'}
