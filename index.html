@@ -2161,15 +2161,14 @@ function populateVisitSelector() {
   const sel = $('#visitSelector');
   if (!sel) return;
   const current = sel.value;
+  const numMap = getVisitNumMap();
   // Sort by date desc
   const sorted = [...state.visits]
     .filter(v => !v.isLegacy)
     .sort(compareVisitsChronoDesc);
   const opts = ['<option value="__new__">+ 신규 회차로 기록</option>'];
   sorted.forEach(v => {
-    const label = v.perfNum
-      ? `#${v.perfNum} · ${v.date}${v.matinee ? ' ' + v.matinee : ''}${v.isWatched ? ' · 관극✓' : ''}`
-      : `${v.date}${v.matinee ? ' ' + v.matinee : ''}${v.isWatched ? ' · 관극✓' : ''}`;
+    const label = `#${numMap[v.id]} · ${v.date}${v.matinee ? ' ' + v.matinee : ''}${v.isWatched ? ' · 관극✓' : ''}`;
     opts.push(`<option value="${escapeHtml(v.id)}">${escapeHtml(label)}</option>`);
   });
   sel.innerHTML = opts.join('');
@@ -2502,7 +2501,7 @@ function renderManderley() {
         </div>`;
     }
 
-    const numLabel = v.isLegacy ? '⌖' : (v.perfNum ? '#' + v.perfNum : '#' + (numMap[v.id] || '?'));
+    const numLabel = v.isLegacy ? '⌖' : '#' + (numMap[v.id] || '?');
     const dateLabel = (v.date || '날짜 없음') + (v.matinee ? ' · ' + v.matinee : '');
     return `
       <div class="visit-card" style="margin-bottom:16px;">
@@ -2535,7 +2534,7 @@ function renderMandPicker() {
     .sort(compareVisitsChronoDesc);
   const numMap = getVisitNumMap();
   const opts = candidates.map(v => {
-    const num = v.perfNum ? '#' + v.perfNum : '#' + (numMap[v.id] || '?');
+    const num = '#' + (numMap[v.id] || '?');
     const label = `${num} · ${v.date || '날짜 없음'}${v.matinee ? ' ' + v.matinee : ''}`;
     return `<option value="${escapeHtml(v.id)}">${escapeHtml(label)}</option>`;
   }).join('');
@@ -2654,6 +2653,8 @@ function renderHistory() {
     visits = visits.filter(v => v.isWatched || v.isLegacy);
   }
 
+  // #N = chronological performance order (used by number search + card badges)
+  const numMap = getVisitNumMap();
   // Search filter — supports text, date, perf number, matinee, AND role=actor pair search
   const pairQuery = parsePairQuery($('#historySearch').value.trim());
   visits = visits.filter(v => {
@@ -2662,9 +2663,9 @@ function renderHistory() {
     if (pairQuery) return visitMatchesPairs(v, pairQuery);
     // Date match
     if (v.date && v.date.toLowerCase().includes(term)) return true;
-    // perfNum: '#150' or '150' or '150회'
-    const perfNumStr = String(v.perfNum || '');
-    if (perfNumStr && (term === '#' + perfNumStr || term === perfNumStr || term === perfNumStr + '회')) return true;
+    // #N by chronological performance order: '#150' or '150' or '150회'
+    const numStr = String(numMap[v.id] || '');
+    if (numStr && (term === '#' + numStr || term === numStr || term === numStr + '회')) return true;
     // matinee
     if (v.matinee && v.matinee.toLowerCase().includes(term)) return true;
     if (v.notes && v.notes.toLowerCase().includes(term)) return true;
@@ -2681,7 +2682,6 @@ function renderHistory() {
   else if (sort === 'asc') visits.sort(compareVisitsChrono);
   else if (sort === 'count') visits.sort((a, b) => b.entries.length - a.entries.length);
 
-  const numMap = getVisitNumMap();
   const list = $('#historyList');
   if (visits.length === 0) {
     const hasFilter = $('#historySearch').value || historyScope !== 'watched';
@@ -2844,10 +2844,10 @@ function renderHistory() {
       `;
     }
 
-    // Header: unify all numbering to "#N" (both perfNum-based and numMap-based)
+    // #N = chronological performance order (numMap). Ignore stored perfNum so both
+    // entry paths (기록 / 회차) and cloud reloads always show one consistent sequence.
     let numLabel;
     if (v.isLegacy) numLabel = '⌖';
-    else if (v.perfNum) numLabel = '#' + v.perfNum;
     else numLabel = '#' + (numMap[v.id] || '?');
 
     const dateLabel = v.isLegacy ? 'Legacy · 엑셀 시드' : ((v.date || '날짜 없음') + (v.matinee ? ' · ' + v.matinee : ''));
