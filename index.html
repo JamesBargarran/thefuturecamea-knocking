@@ -977,6 +977,16 @@ body.role-guest .guest-readonly-note { display: block; }
       모든 기록은 이 브라우저에만 저장됩니다. 정기적으로 백업 파일을 받아두세요.
     </p>
 
+    <div class="excel-section" id="bulkWatchSection">
+      <h3>대량 관극 기록</h3>
+      <div class="excel-sub">Bulk watched + encounters</div>
+      <div class="excel-desc">
+        이미 등록된 공연(시드)에 대해 <strong>내가 본 회차</strong>와 <strong>그날 본 만남</strong>을 한 번에 기록합니다.
+        배우는 그날 캐스팅에서 <strong>자동으로 채워집니다</strong> — 어떤 장면을 봤는지만 지정하면 됩니다.
+      </div>
+      <div id="bulkWatchBody"></div>
+    </div>
+
     <div class="excel-section">
       <h3>엑셀로 일괄 입력</h3>
       <div class="excel-sub">Bulk Import via Excel</div>
@@ -5750,6 +5760,352 @@ function renderHeader() {
   }
 }
 
+// ============ 대량 관극 기록 (Bulk watched + encounters) ============
+let bulkWatchMode = 'paste';   // 'paste' | 'checklist'
+let bulkWatchText = '';
+let bulkWatchResolved = null;   // last resolved paste plan (for apply)
+const bwExpanded = new Set();   // checklist: expanded visit ids
+
+// Derive the actor the viewer saw for a scene, from that night's casting.
+function autoActorForScene(scene, visit) {
+  if (!scene || !visit) return '';
+  const casting = visit.casting || {};
+  if (Array.isArray(scene.composedOf) && scene.composedOf.length) {
+    const parts = scene.composedOf.map(ch => casting[ch] || '');
+    return parts.every(Boolean) ? parts.join(' X ') : '';
+  }
+  if (scene.freeCombo) return '';   // 자유 조합 → 자동 불가
+  const chars = inferSceneCharacters(scene);
+  if (chars.length === 1) return casting[chars[0]] || '';
+  if (chars.length > 1) {
+    const parts = chars.map(ch => casting[ch] || '');
+    return parts.every(Boolean) ? parts.join(' X ') : '';
+  }
+  if (casting[scene.role]) return casting[scene.role];   // walkout: role == character
+  return '';
+}
+
+function normalizeDateStr(d) {
+  const m = String(d).match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  return m ? `${m[1]}-${m[2].padStart(2,'0')}-${m[3].padStart(2,'0')}` : String(d);
+}
+function detectMatinee(s) {
+  const t = (s || '').replace(/\s+/g, '');
+  if (/마티네|마틴|낮공|낮|mat|day/i.test(t)) return '마티네';
+  if (/이브닝|이브|저녁|밤공|밤|eve|night/i.test(t)) return '이브닝';
+  return '';
+}
+function splitSceneList(s) { return String(s).split(/[,;、\/]+/).map(x => x.trim()).filter(Boolean); }
+
+// Fuzzy-match typed text to a scene. Returns scene | null | array(ambiguous).
+function matchSceneByName(textIn) {
+  const norm = s => String(s).replace(/\s+/g, '').toLowerCase();
+  const t = norm(textIn);
+  if (!t) return null;
+  let exact = null;
+  const contains = [];
+  state.scenes.forEach(s => {
+    const r = norm(s.role);
+    if (r === t) { exact = s; return; }
+    if (r.includes(t) || t.includes(r)) contains.push(s);
+  });
+  if (exact) return exact;
+  if (contains.length === 1) return contains[0];
+  if (contains.length > 1) return contains;
+  return null;
+}
+
+// Parse pasted text (both multi-line block AND one-line "date | scenes").
+function parseBulkPaste(txt) {
+  const lines = String(txt).split(/\r?\n/);
+  const dateRe = /^\s*(\d{4}-\d{1,2}-\d{1,2})\s*(.*)$/;
+  const items = [];
+  let cur = null;
+  lines.forEach(raw => {
+    const line = raw.trim();
+    const m = line.match(dateRe);
+    if (m) {
+      let rest = (m[2] || '').trim();
+      let scenesPart = '';
+      const sep = rest.search(/[|:：]/);
+      let matPart = rest;
+      if (sep >= 0) { matPart = rest.slice(0, sep); scenesPart = rest.slice(sep + 1); }
+      cur = { date: normalizeDateStr(m[1]), matinee: detectMatinee(matPart), sceneTexts: [] };
+      if (scenesPart.trim()) splitSceneList(scenesPart).forEach(x => cur.sceneTexts.push(x));
+      items.push(cur);
+    } else if (line && cur) {
+      splitSceneList(line).forEach(x => cur.sceneTexts.push(x));
+    }
+  });
+  return items;
+}
+
+function resolveBulkPlan(items) {
+  return items.map(it => {
+    const visit = matchImportVisit(it.date, it.matinee, null);
+    const sameDate = state.visits.filter(v => !v.isLegacy && v.date === it.date);
+    const ambiguousDate = !visit && sameDate.length > 1 && !it.matinee;
+    const scenes = it.sceneTexts.map(txt => {
+      const mt = matchSceneByName(txt);
+      if (Array.isArray(mt)) return { text: txt, scene: null, ambiguous: mt, actor: '' };
+      const actor = (mt && visit) ? autoActorForScene(mt, visit) : '';
+      return { text: txt, scene: mt || null, ambiguous: null, actor };
+    });
+    return { date: it.date, matinee: it.matinee, visit, ambiguousDate, scenes };
+  });
+}
+
+function renderBulkWatch() {
+  const body = $('#bulkWatchBody');
+  if (!body) return;
+  body.innerHTML = `
+    <div class="casting-mode-toggle" id="bulkWatchToggle" style="margin-bottom:16px;">
+      <button class="${bulkWatchMode === 'paste' ? 'active' : ''}" data-bw="paste">붙여넣기</button>
+      <button class="${bulkWatchMode === 'checklist' ? 'active' : ''}" data-bw="checklist">체크리스트</button>
+    </div>
+    <div id="bulkWatchModeBody"></div>`;
+  $$('#bulkWatchToggle button').forEach(b => b.addEventListener('click', () => {
+    bulkWatchMode = b.dataset.bw;
+    renderBulkWatch();
+  }));
+  if (bulkWatchMode === 'paste') renderBulkWatchPaste();
+  else renderBulkChecklist();
+}
+
+function renderBulkWatchPaste() {
+  const wrap = $('#bulkWatchModeBody');
+  if (!wrap) return;
+  wrap.innerHTML = `
+    <div class="excel-desc" style="margin-bottom:8px;">
+      두 형식 모두 인식됩니다:<br>
+      · <strong>여러 줄</strong>: 날짜[ 마티네/이브닝] 줄 다음에 장면명을 한 줄씩<br>
+      · <strong>한 줄</strong>: <code>2025-08-02 이브닝 | 맥더프 1:1, 헤카테 룸 1:1</code><br>
+      장면을 안 적고 날짜만 넣으면 <strong>관극 표시만</strong> 됩니다. 배우는 그날 캐스팅에서 자동 채움.
+    </div>
+    <textarea id="bulkWatchInput" placeholder="2025-08-02 이브닝&#10;맥더프 1:1&#10;헤카테 룸 1:1&#10;&#10;2025-08-06 이브닝 | 볼드위치 1:1" style="width:100%; min-height:150px; background:var(--paper-deep); border:1px solid var(--rule); color:var(--ink); font-family:var(--mono); font-size:13px; padding:10px 12px; box-sizing:border-box;">${escapeHtml(bulkWatchText)}</textarea>
+    <div class="excel-actions" style="margin-top:10px;">
+      <button id="bulkWatchPreviewBtn" class="primary">미리보기</button>
+      <button id="bulkWatchRefBtn">장면 목록 보기</button>
+    </div>
+    <div class="preview-box" id="bulkWatchPreview"></div>`;
+  const ta = $('#bulkWatchInput');
+  ta.addEventListener('input', () => { bulkWatchText = ta.value; });
+  $('#bulkWatchPreviewBtn').addEventListener('click', doBulkWatchPreview);
+  $('#bulkWatchRefBtn').addEventListener('click', showSceneRef);
+}
+
+function showSceneRef() {
+  const byType = { '1:1': [], '인터랙션': [], '워크아웃': [] };
+  state.scenes.forEach(s => { (byType[s.type] = byType[s.type] || []).push(s.role); });
+  const html = Object.entries(byType).map(([t, roles]) =>
+    `<div style="margin-bottom:10px;"><div style="font-family:var(--mono); font-size:10px; letter-spacing:0.2em; color:var(--gold); text-transform:uppercase; margin-bottom:4px;">${t} · ${roles.length}</div><div style="font-size:12px; color:var(--ink-dim); line-height:1.7;">${roles.map(escapeHtml).join(' · ')}</div></div>`
+  ).join('');
+  openModal('장면 목록', '붙여넣기에 쓸 수 있는 장면명 (부분만 적어도 매칭됨)', html);
+}
+
+function doBulkWatchPreview() {
+  const ta = $('#bulkWatchInput');
+  bulkWatchText = ta ? ta.value : bulkWatchText;
+  const items = parseBulkPaste(bulkWatchText);
+  const resolved = resolveBulkPlan(items);
+  bulkWatchResolved = resolved;
+  const numMap = getVisitNumMap();
+  let okVisits = 0, failVisits = 0, okScenes = 0, failScenes = 0;
+  const rows = resolved.map(it => {
+    let vLabel, vClass;
+    if (it.visit) { vLabel = `#${numMap[it.visit.id]} · ${it.visit.date}${it.visit.matinee ? ' ' + it.visit.matinee : ''}`; vClass = 'color:var(--gold);'; okVisits++; }
+    else { vLabel = it.ambiguousDate ? `${it.date} (마티네/이브닝 불명 → 건너뜀)` : `${it.date}${it.matinee ? ' ' + it.matinee : ''} · 매칭 실패`; vClass = 'color:var(--blood-bright);'; failVisits++; }
+    const sceneHtml = it.scenes.map(sr => {
+      if (sr.scene) { okScenes++; const a = sr.actor ? ` <span style="color:var(--gold);">${escapeHtml(sr.actor)}</span>` : ' <span style="color:var(--blood-bright);">배우 자동채움 실패(확인필요)</span>'; return `<div style="font-size:12px;">· ${escapeHtml(sr.scene.role)}${a}</div>`; }
+      failScenes++;
+      const amb = sr.ambiguous ? ` (여러 장면과 매칭: ${sr.ambiguous.map(s=>escapeHtml(s.role)).slice(0,3).join(', ')}…)` : '';
+      return `<div style="font-size:12px; color:var(--blood-bright);">· "${escapeHtml(sr.text)}" 매칭 실패${amb}</div>`;
+    }).join('');
+    return `<div style="padding:8px 0; border-bottom:1px dotted var(--rule);"><div style="${vClass} font-family:var(--mono); font-size:12px;">${escapeHtml(vLabel)}</div>${sceneHtml}</div>`;
+  }).join('');
+  const box = $('#bulkWatchPreview');
+  box.classList.add('open');
+  box.innerHTML = `
+    <div class="preview-title">미리보기</div>
+    <div class="preview-stats">
+      <div class="preview-stat">회차 매칭 <strong>${okVisits}</strong> / 실패 <strong>${failVisits}</strong></div>
+      <div class="preview-stat">만남 매칭 <strong>${okScenes}</strong> / 실패 <strong>${failScenes}</strong></div>
+    </div>
+    ${(failVisits || failScenes) ? `<div class="warning-list"><div class="warn-title">⚠ 실패 항목은 반영되지 않습니다</div>날짜는 <code>YYYY-MM-DD</code>, 같은 날 2회차면 마티네/이브닝을 함께, 장면명은 "장면 목록 보기" 참고.</div>` : ''}
+    <div style="max-height:320px; overflow-y:auto; margin-top:10px;">${rows || '<div style="color:var(--ink-faint); font-style:italic;">해석할 내용이 없습니다.</div>'}</div>
+    <div style="margin-top:14px; display:flex; gap:10px;">
+      <button class="btn-save" id="bulkWatchApplyBtn" style="padding:10px 20px; font-family:var(--mono); font-size:10px; letter-spacing:0.2em; text-transform:uppercase; cursor:pointer;">확정 · ${okVisits}회차 반영</button>
+      <button class="btn-clear-all" id="bulkWatchCancelBtn" style="padding:10px 20px; font-family:var(--mono); font-size:10px; letter-spacing:0.2em; text-transform:uppercase; cursor:pointer;">취소</button>
+    </div>`;
+  const applyBtn = $('#bulkWatchApplyBtn');
+  if (applyBtn) applyBtn.addEventListener('click', () => { if (okVisits === 0) { showToast('반영할 회차가 없습니다'); return; } applyBulkWatch(bulkWatchResolved); });
+  const cancelBtn = $('#bulkWatchCancelBtn');
+  if (cancelBtn) cancelBtn.addEventListener('click', () => { box.classList.remove('open'); box.innerHTML = ''; });
+}
+
+function bwSyncVisit(v) {
+  touchVisit(v);
+  if (v.userAdded || (v.id && !v.id.startsWith('perf_'))) queueAddedVisitPush(v.id);
+  else queueVisitStatePush(v.id);
+}
+
+function applyBulkWatch(resolved) {
+  if (guardGuest()) return;
+  if (!resolved || !resolved.length) { showToast('반영할 내용이 없습니다'); return; }
+  snapshotForUndo('대량 관극 기록');
+  let watchedN = 0, encN = 0;
+  resolved.forEach(it => {
+    const v = it.visit;
+    if (!v) return;
+    if (!v.isWatched) { v.isWatched = true; }
+    watchedN++;
+    it.scenes.forEach(sr => {
+      if (!sr.scene) return;
+      const actor = sr.actor || '';
+      const dup = (v.entries || []).some(e => e.sceneId === sr.scene.id && e.actor === actor);
+      if (!dup) { v.entries = [...(v.entries || []), { sceneId: sr.scene.id, actor }]; encN++; }
+    });
+    bwSyncVisit(v);
+  });
+  saveState();
+  renderHeader();
+  bulkWatchText = '';
+  const box = $('#bulkWatchPreview');
+  if (box) { box.classList.remove('open'); box.innerHTML = ''; }
+  renderBulkWatch();
+  showToast(`관극 ${watchedN}회차 · 만남 ${encN}개 반영됨`);
+}
+
+// ---------- Checklist mode ----------
+function renderBulkChecklist() {
+  const wrap = $('#bulkWatchModeBody');
+  if (!wrap) return;
+  wrap.innerHTML = `
+    <div class="history-controls" style="margin-bottom:12px;">
+      <input type="text" id="bwSearch" placeholder="날짜·#번호 검색…" style="flex:1; min-width:200px;">
+      <label style="display:flex; align-items:center; gap:6px; font-family:var(--mono); font-size:11px; color:var(--ink-dim); white-space:nowrap; cursor:pointer;">
+        <input type="checkbox" id="bwOnlyUnwatched"> 미관극만 보기
+      </label>
+    </div>
+    <div style="font-size:12px; color:var(--ink-faint); font-style:italic; margin-bottom:10px;">체크 = 관극 표시. 회차의 <strong>만남 ▾</strong>을 열어 그날 본 장면을 체크하면 배우가 자동 입력됩니다.</div>
+    <div id="bwList"></div>`;
+  const s = $('#bwSearch'); if (s) s.addEventListener('input', renderBwList);
+  const u = $('#bwOnlyUnwatched'); if (u) u.addEventListener('change', renderBwList);
+  renderBwList();
+}
+
+function renderBwList() {
+  const listEl = $('#bwList');
+  if (!listEl) return;
+  const term = ($('#bwSearch') ? $('#bwSearch').value : '').toLowerCase().trim();
+  const onlyUn = $('#bwOnlyUnwatched') && $('#bwOnlyUnwatched').checked;
+  const numMap = getVisitNumMap();
+  let visits = state.visits.filter(v => !v.isLegacy).sort(compareVisitsChrono);
+  if (onlyUn) visits = visits.filter(v => !v.isWatched);
+  if (term) visits = visits.filter(v =>
+    (v.date || '').toLowerCase().includes(term) ||
+    ('#' + numMap[v.id]).includes(term) ||
+    String(numMap[v.id]) === term ||
+    (v.matinee || '').includes(term));
+  if (!visits.length) { listEl.innerHTML = '<div style="color:var(--ink-faint); font-style:italic; padding:16px;">조건에 맞는 회차가 없습니다.</div>'; return; }
+  const groups = {};
+  visits.forEach(v => { const mo = (v.date || '????-??').slice(0, 7); (groups[mo] = groups[mo] || []).push(v); });
+  listEl.innerHTML = Object.entries(groups).map(([mo, vs]) => `
+    <div style="margin-bottom:14px;">
+      <div style="display:flex; align-items:center; gap:10px; margin-bottom:6px;">
+        <div style="font-family:var(--serif-display); font-style:italic; font-size:16px; color:var(--gold);">${escapeHtml(mo)}</div>
+        <button class="mini-btn" data-bw-month="${escapeHtml(mo)}" style="padding:4px 10px;">이 달 전체 관극</button>
+        <span style="font-family:var(--mono); font-size:10px; color:var(--ink-faint);">${vs.filter(v=>v.isWatched).length}/${vs.length} 관극</span>
+      </div>
+      ${vs.map(v => bwRowHtml(v, numMap)).join('')}
+    </div>`).join('');
+  wireBwList();
+}
+
+function bwRowHtml(v, numMap) {
+  const encCount = (v.entries || []).length;
+  const isOpen = bwExpanded.has(v.id);
+  return `
+    <div class="visit-card" style="margin-bottom:6px;">
+      <div style="display:flex; align-items:center; gap:12px; padding:10px 14px;">
+        <label style="display:flex; align-items:center; gap:8px; cursor:pointer; flex:1;">
+          <input type="checkbox" data-bw-watch="${escapeHtml(v.id)}" ${v.isWatched ? 'checked' : ''} style="width:18px; height:18px;">
+          <span style="font-family:var(--serif-display); font-style:italic; font-size:18px; color:var(--gold);">#${numMap[v.id]}</span>
+          <span style="font-family:var(--mono); font-size:12px; color:var(--ink-dim);">${escapeHtml(v.date || '날짜없음')}${v.matinee ? ' · ' + escapeHtml(v.matinee) : ''}</span>
+          ${v.isWatched ? '<span style="font-family:var(--mono); font-size:9px; color:var(--blood-bright); letter-spacing:0.2em;">관극</span>' : ''}
+        </label>
+        <button class="mini-btn" data-bw-expand="${escapeHtml(v.id)}" style="padding:5px 10px;">만남 ${encCount ? '(' + encCount + ') ' : ''}${isOpen ? '▴' : '▾'}</button>
+      </div>
+      ${isOpen ? `<div style="padding:0 14px 12px 14px; border-top:1px dotted var(--rule);">${bwEncoderHtml(v)}</div>` : ''}
+    </div>`;
+}
+
+function bwEncoderHtml(v) {
+  const byType = { '1:1': [], '인터랙션': [], '워크아웃': [] };
+  state.scenes.forEach(s => { if (byType[s.type]) byType[s.type].push(s); });
+  const has = (sid) => (v.entries || []).some(e => e.sceneId === sid);
+  const section = (t) => {
+    const items = byType[t] || [];
+    if (!items.length) return '';
+    return `<div style="margin-top:8px;"><div style="font-family:var(--mono); font-size:9px; letter-spacing:0.2em; color:var(--gold); text-transform:uppercase; margin-bottom:4px;">${t}</div>
+      <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(200px,1fr)); gap:4px;">
+      ${items.map(s => {
+        const actor = autoActorForScene(s, v);
+        const checked = has(s.id);
+        return `<label style="display:flex; align-items:center; gap:6px; font-size:12px; cursor:pointer; padding:2px 0;">
+          <input type="checkbox" data-bw-enc="${escapeHtml(v.id)}" data-scene="${escapeHtml(s.id)}" ${checked ? 'checked' : ''}>
+          <span style="color:var(--ink);">${escapeHtml(s.role)}</span>${actor ? `<span style="color:var(--gold); font-family:var(--mono); font-size:10px;">${escapeHtml(actor)}</span>` : ''}
+        </label>`;
+      }).join('')}
+      </div></div>`;
+  };
+  return section('1:1') + section('인터랙션') + section('워크아웃');
+}
+
+function wireBwList() {
+  $$('[data-bw-watch]').forEach(cb => cb.addEventListener('change', () => {
+    if (guardGuest()) { cb.checked = !cb.checked; return; }
+    const v = state.visits.find(x => x.id === cb.dataset.bwWatch);
+    if (!v) return;
+    snapshotForUndo('관극 표시 변경');
+    v.isWatched = cb.checked;
+    bwSyncVisit(v); saveState(); renderHeader();
+    renderBwList();
+  }));
+  $$('[data-bw-expand]').forEach(b => b.addEventListener('click', () => {
+    const id = b.dataset.bwExpand;
+    if (bwExpanded.has(id)) bwExpanded.delete(id); else bwExpanded.add(id);
+    renderBwList();
+  }));
+  $$('[data-bw-enc]').forEach(cb => cb.addEventListener('change', () => {
+    if (guardGuest()) { cb.checked = !cb.checked; return; }
+    const v = state.visits.find(x => x.id === cb.dataset.bwEnc);
+    const scene = getSceneById(cb.dataset.scene);
+    if (!v || !scene) return;
+    snapshotForUndo('만남 기록 변경');
+    if (cb.checked) {
+      const actor = autoActorForScene(scene, v);
+      if (!(v.entries || []).some(e => e.sceneId === scene.id && e.actor === actor)) {
+        v.entries = [...(v.entries || []), { sceneId: scene.id, actor }];
+      }
+      if (!v.isWatched) v.isWatched = true;   // recording an encounter implies watched
+    } else {
+      v.entries = (v.entries || []).filter(e => e.sceneId !== scene.id);
+    }
+    bwSyncVisit(v); saveState(); renderHeader();
+  }));
+  $$('[data-bw-month]').forEach(b => b.addEventListener('click', () => {
+    if (guardGuest()) return;
+    const mo = b.dataset.bwMonth;
+    const targets = state.visits.filter(v => !v.isLegacy && (v.date || '').slice(0, 7) === mo && !v.isWatched);
+    if (!targets.length) { showToast('이미 모두 관극 표시됨'); return; }
+    snapshotForUndo('이 달 전체 관극');
+    targets.forEach(v => { v.isWatched = true; bwSyncVisit(v); });
+    saveState(); renderHeader(); renderBwList();
+    showToast(`${mo} ${targets.length}회차 관극 표시`);
+  }));
+}
+
 function renderActive(page) {
   if (page === 'record') { renderScenes(); renderCastingInputs(); populateVisitSelector(); }
   else if (page === 'history') renderHistory();
@@ -5768,6 +6124,7 @@ function renderActive(page) {
   else if (page === 'pairing') populatePairingDropdowns();
   else if (page === 'performers') renderPerformers();
   else if (page === 'favorites') renderActorTags();
+  else if (page === 'data') renderBulkWatch();
 }
 
 // ============ AUTH + BOOTSTRAP ============
