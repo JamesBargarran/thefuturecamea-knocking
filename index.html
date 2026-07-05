@@ -794,7 +794,13 @@ body.role-guest .guest-readonly-note { display: block; }
         <option value="인터랙션">인터랙션</option>
         <option value="워크아웃">워크아웃</option>
       </select>
+      <select id="roleCompletion" title="컴플리션 필터">
+        <option value="all">전체 보기</option>
+        <option value="unseen">미획득 장면(0회)</option>
+        <option value="incomplete">미완성(배우 남음)</option>
+      </select>
     </div>
+    <div id="roleProgress"></div>
     <div class="role-grid" id="rolesList"></div>
   </div>
 
@@ -987,8 +993,9 @@ body.role-guest .guest-readonly-note { display: block; }
       <div id="bulkWatchBody"></div>
     </div>
 
-    <div class="excel-section">
-      <h3>엑셀로 일괄 입력</h3>
+    <details class="excel-section">
+      <summary style="cursor:pointer; font-family:var(--serif-display); font-size:18px; font-style:italic; color:var(--ink-dim); list-style:none;">▸ 고급 · 엑셀 캐스팅/만남 일괄 입력 <span style="font-family:var(--mono); font-size:10px; color:var(--ink-faint);">(관리자용 · 대부분 '대량 관극 기록' 사용)</span></summary>
+      <h3 style="display:none;">엑셀로 일괄 입력</h3>
       <div class="excel-sub">Bulk Import via Excel</div>
       <div class="excel-desc">
         두 가지 템플릿을 다운로드해 채워 넣고 업로드하세요.<br>
@@ -1005,7 +1012,7 @@ body.role-guest .guest-readonly-note { display: block; }
         <input type="file" id="encountersFile" accept=".xlsx,.xls" style="display:none;">
       </div>
       <div class="preview-box" id="previewBox"></div>
-    </div>
+    </details>
 
     <h3 style="font-family: var(--serif-display); font-size: 22px; font-style: italic; margin: 32px 0 12px;">백업 · Backup</h3>
     <div class="data-controls">
@@ -2078,6 +2085,33 @@ function askWatched() {
   });
 }
 
+// C1: 이미 있는 회차와 겹칠 때 선택. resolves 'append' | 'new' | 'cancel'
+function askDuplicate(label) {
+  return new Promise(resolve => {
+    const back = document.createElement('div');
+    back.className = 'modal-backdrop open';
+    back.style.zIndex = '400';
+    back.innerHTML = `
+      <div class="modal" style="max-width:480px; text-align:center;">
+        <h3 style="margin-bottom:6px;">이미 있는 회차예요</h3>
+        <div class="modal-sub">${escapeHtml(label)} 기록이 이미 있습니다</div>
+        <div style="font-size:13px; color:var(--ink-dim); margin:6px 0 14px;">그 회차에 이어서 기록할까요, 아니면 별도로 새로 만들까요?</div>
+        <div style="display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">
+          <button type="button" class="btn" style="width:auto; padding:13px 24px;" data-a="append">이어서 기록</button>
+          <button type="button" class="btn ghost" style="width:auto; padding:13px 24px;" data-a="new">새로 만들기</button>
+          <button type="button" class="btn ghost" style="width:auto; padding:13px 24px;" data-a="cancel">취소</button>
+        </div>
+      </div>`;
+    document.body.appendChild(back);
+    let done = false;
+    function finish(v) { if (done) return; done = true; document.removeEventListener('keydown', onKey); back.remove(); resolve(v); }
+    function onKey(e) { if (e.key === 'Escape') finish('cancel'); }
+    back.addEventListener('click', (e) => { if (e.target === back) finish('cancel'); });
+    back.querySelectorAll('[data-a]').forEach(b => b.addEventListener('click', () => finish(b.dataset.a)));
+    document.addEventListener('keydown', onKey);
+  });
+}
+
 function renderCastingInputs() {
   const wrap = $('#castingInputs');
   wrap.innerHTML = state.characters.map(c => {
@@ -2264,26 +2298,66 @@ $('#saveVisit').addEventListener('click', async () => {
   });
 
   if (visitChoice === '__new__') {
-    // Create a fresh user visit
-    snapshotForUndo('신규 회차 기록');
-    const now = Date.now();
-    const visit = {
-      id: 'v' + now,
-      date: date || new Date().toISOString().slice(0, 10),
-      matinee: normalizeMatinee(matinee),
-      notes,
-      entries,
-      casting: { ...currentCasting },
-      isLegacy: false,
-      isWatched: watched,
-      userAdded: true,
-      source: 'user_visit',
-      createdAt: now,
-      updatedAt: now
-    };
-    state.visits.push(visit);
-    queueAddedVisitPush(visit.id);
-    showToast(watched ? '신규 회차로 관극 기록됨' : '신규 회차로 기록만 저장됨');
+    const effDate = date || new Date().toISOString().slice(0, 10);
+    const dup = matchImportVisit(effDate, matinee, null);
+    let appended = false;
+    if (dup) {
+      const nm = getVisitNumMap();
+      const choice = await askDuplicate(`#${nm[dup.id]} · ${dup.date}${dup.matinee ? ' ' + dup.matinee : ''}`);
+      if (choice === 'cancel') return;
+      if (choice === 'append') {
+        const v = dup;
+        snapshotForUndo(`#${nm[v.id]} 회차에 이어 기록`);
+        (entries || []).forEach(e => {
+          if (!(v.entries || []).some(x => x.sceneId === e.sceneId && x.actor === e.actor)) v.entries = [...(v.entries || []), e];
+        });
+        const isSeedPerf = v.id && v.id.startsWith('perf_') && !v.userAdded;
+        if (Object.keys(currentCasting).length > 0) {
+          if (isSeedPerf && !currentUserIsAdmin) {
+            if (!('seedCasting' in v)) v.seedCasting = { ...(v.casting || {}) };
+            const base = v.seedCasting || {};
+            const changed = {};
+            Object.keys(currentCasting).forEach(role => { if (currentCasting[role] !== base[role]) changed[role] = currentCasting[role]; });
+            if (Object.keys(changed).length > 0) v.userCasting = { ...(v.userCasting || {}), ...changed };
+            v.casting = { ...base, ...(v.userCasting || {}) };
+          } else {
+            v.casting = { ...(v.casting || {}), ...currentCasting };
+          }
+        }
+        if (notes) {
+          if (!('seedNotes' in v)) v.seedNotes = (v.notes && v.notes !== matinee) ? v.notes : '';
+          v.userNotes = v.userNotes ? `${v.userNotes} · ${notes}` : notes;
+          v.notes = composeNotes(v);
+        }
+        v.isWatched = watched;
+        touchVisit(v);
+        if (v.userAdded || (v.id && !v.id.startsWith('perf_'))) queueAddedVisitPush(v.id); else queueVisitStatePush(v.id);
+        showToast(`#${nm[v.id]} 회차에 이어 기록됨`);
+        appended = true;
+      }
+    }
+    if (!appended) {
+      // Create a fresh user visit
+      snapshotForUndo('신규 회차 기록');
+      const now = Date.now();
+      const visit = {
+        id: 'v' + now,
+        date: effDate,
+        matinee: normalizeMatinee(matinee),
+        notes,
+        entries,
+        casting: { ...currentCasting },
+        isLegacy: false,
+        isWatched: watched,
+        userAdded: true,
+        source: 'user_visit',
+        createdAt: now,
+        updatedAt: now
+      };
+      state.visits.push(visit);
+      queueAddedVisitPush(visit.id);
+      showToast(watched ? '신규 회차로 관극 기록됨' : '신규 회차로 기록만 저장됨');
+    }
   } else {
     // Append entries to an existing visit (and mark as watched)
     const v = state.visits.find(x => x.id === visitChoice);
@@ -3398,6 +3472,11 @@ $('#confirmNewPerf').addEventListener('click', () => {
   const isWatched = $('#newPerfWatched').value === 'true';
 
   if (!date) { showToast('날짜를 입력하세요'); return; }
+  const _dup = matchImportVisit(date, matinee, null);
+  if (_dup) {
+    const _nm = getVisitNumMap();
+    if (!confirm(`이미 #${_nm[_dup.id]} (${_dup.date}${_dup.matinee ? ' ' + _dup.matinee : ''}) 회차가 있습니다.\n그래도 새로 추가할까요? (중복 생성)`)) return;
+  }
 
   const casting = {};
   // Read from newPerfReplacements (handles multi-slot replacements)
@@ -3730,24 +3809,69 @@ $('#statsView') && $('#statsView').addEventListener('change', (e) => {
 function renderRoles() {
   const term = $('#roleSearch').value.toLowerCase().trim();
   const filterType = $('#roleType').value;
+  const compFilter = $('#roleCompletion') ? $('#roleCompletion').value : 'all';
+
+  const sceneActorCounts = getSceneActorCounts();
+  const seenOf = (s) => !!sceneActorCounts[s.id];   // scene experienced at all
+  const perfStats = (s) => {   // 배역×퍼포머: pool actors experienced / pool size
+    const pool = getSceneActors(s);
+    const counts = sceneActorCounts[s.id] || {};
+    return { seen: pool.filter(a => (counts[a] || 0) > 0).length, total: pool.length };
+  };
+
+  // Two completion metrics by type, over ALL scenes
+  const TYPES = ['1:1', '인터랙션', '워크아웃'];
+  const sc = {}, pf = {};
+  TYPES.forEach(t => { sc[t] = { seen: 0, total: 0 }; pf[t] = { seen: 0, total: 0 }; });
+  state.scenes.forEach(s => {
+    if (!sc[s.type]) return;
+    sc[s.type].total++; if (seenOf(s)) sc[s.type].seen++;
+    const ps = perfStats(s); pf[s.type].seen += ps.seen; pf[s.type].total += ps.total;
+  });
+  const sumT = (o) => TYPES.reduce((a, t) => ({ seen: a.seen + o[t].seen, total: a.total + o[t].total }), { seen: 0, total: 0 });
+  const scAll = sumT(sc), pfAll = sumT(pf);
+  const barRow = (label, obj, allObj) => `
+      <div style="font-family:var(--mono); font-size:10px; letter-spacing:0.15em; color:var(--gold); text-transform:uppercase; margin-bottom:6px;">${label} · ${allObj.seen}/${allObj.total} (${allObj.total ? Math.round(allObj.seen / allObj.total * 100) : 0}%)</div>
+      <div style="display:flex; gap:16px; flex-wrap:wrap;">
+        ${TYPES.map(t => {
+          const { seen, total } = obj[t];
+          const pct = total ? Math.round(seen / total * 100) : 0;
+          return `<div style="flex:1; min-width:150px;">
+            <div style="display:flex; justify-content:space-between; font-family:var(--mono); font-size:11px; margin-bottom:4px;"><span style="color:var(--ink);">${t}</span><span style="color:var(--gold);">${seen}/${total} · ${pct}%</span></div>
+            <div style="height:6px; background:var(--paper-deep); border:1px solid var(--rule); position:relative; overflow:hidden;"><div style="position:absolute; inset:0; transform:scaleX(${pct / 100}); transform-origin:left; background:linear-gradient(90deg,var(--blood),var(--blood-bright));"></div></div>
+          </div>`;
+        }).join('')}
+      </div>`;
+  const pEl = $('#roleProgress');
+  if (pEl) {
+    pEl.innerHTML = `
+      <div style="background:var(--paper-raised); border:1px solid var(--rule); padding:14px 16px; margin-bottom:16px;">
+        ${barRow('배역 기준 · 장면 경험', sc, scAll)}
+        <div style="height:1px; background:var(--rule); margin:12px 0;"></div>
+        ${barRow('배우 기준 · 배역×퍼포머', pf, pfAll)}
+      </div>`;
+  }
 
   const scenes = state.scenes.filter(s => {
     if (filterType !== 'all' && s.type !== filterType) return false;
+    if (compFilter === 'unseen' && seenOf(s)) return false;
+    if (compFilter === 'incomplete') { const ps = perfStats(s); if (ps.total > 0 && ps.seen >= ps.total) return false; }
     if (!term) return true;
     if (s.role.toLowerCase().includes(term)) return true;
     if (getSceneActors(s).some(a => a.toLowerCase().includes(term))) return true;
     return false;
   });
 
-  const sceneActorCounts = getSceneActorCounts();
-
   $('#rolesList').innerHTML = scenes.map(s => {
     const counts = sceneActorCounts[s.id] || {};
     const actors = getSceneActors(s);
+    const unseen = !seenOf(s);
+    const ps = perfStats(s);
+    const perfLabel = ps.total ? ` <span style="font-family:var(--mono); font-size:10px; color:${ps.seen >= ps.total ? 'var(--gold)' : 'var(--ink-dim)'};">· 배우 ${ps.seen}/${ps.total}</span>` : '';
     return `
       <div class="role-summary" data-scene="${s.id}">
-        <div class="role-name">${escapeHtml(s.role)}</div>
-        <div class="role-type">${s.type}${s.linkedChar ? ` · ${escapeHtml(s.linkedChar)}` : ''}${s.userAdded ? ' · 사용자' : ''}</div>
+        <div class="role-name">${escapeHtml(s.role)}${unseen ? ' <span style="font-family:var(--mono); font-size:9px; color:var(--blood-bright); letter-spacing:0.15em;">미획득</span>' : ''}</div>
+        <div class="role-type">${s.type}${s.linkedChar ? ` · ${escapeHtml(s.linkedChar)}` : ''}${s.userAdded ? ' · 사용자' : ''}${perfLabel}</div>
         <div class="role-actors">
           ${actors.map(a => {
             const c = counts[a] || 0;
@@ -3767,6 +3891,7 @@ function renderRoles() {
 
 $('#roleSearch').addEventListener('input', renderRoles);
 $('#roleType').addEventListener('change', renderRoles);
+$('#roleCompletion') && $('#roleCompletion').addEventListener('change', renderRoles);
 
 // ============ INTERACTIONS ============
 function renderInteractions() {
