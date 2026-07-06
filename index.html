@@ -53,6 +53,7 @@ nav { display: flex; gap: 0; margin-bottom: 40px; border-bottom: 1px solid var(-
 .tab { background: none; border: none; color: var(--ink-dim); font-family: var(--mono); font-size: 11px; letter-spacing: 0.24em; text-transform: uppercase; padding: 16px 24px; cursor: pointer; position: relative; transition: color 0.2s; font-weight: 400; }
 .tab:hover { color: var(--ink); }
 .tab.active { color: var(--ink); }
+.nav-sep { align-self: center; width: 1px; height: 16px; background: var(--rule); margin: 0 4px; flex-shrink: 0; pointer-events: none; }
 .tab.active::after { content: ''; position: absolute; bottom: -1px; left: 24px; right: 24px; height: 1px; background: var(--blood-bright); }
 
 .page { display: none; }
@@ -577,6 +578,7 @@ body.role-guest .guest-readonly-note { display: block; }
         <div class="counter-label">Visits Recorded</div>
         <div class="counter-manderley" id="manderleyCounter" style="display:none; font-family: var(--mono); font-size: 9px; letter-spacing: 0.22em; color: var(--ink-faint); text-transform: lowercase; margin-top: 4px;"></div>
         <div style="margin-top: 8px; display: flex; gap: 8px; justify-content: flex-end; align-items: center;">
+          <button id="helpBtn" title="사용법 · 도움말" style="background: transparent; border: 1px solid var(--gold-dim); color: var(--gold); font-family: var(--mono); font-size: 9px; letter-spacing: 0.15em; padding: 4px 8px; cursor: pointer;">? 도움말</button>
           <button id="undoBtn" title="마지막 작업 되돌리기" style="background: transparent; border: 1px solid var(--rule); color: var(--ink-faint); font-family: var(--mono); font-size: 9px; letter-spacing: 0.15em; padding: 4px 8px; cursor: pointer;">↶ UNDO</button>
           <span id="saveIndicator" style="font-family: var(--mono); font-size: 9px; color: var(--ink-faint); letter-spacing: 0.1em; opacity: 0.5; transition: opacity 0.3s;">—</span>
         </div>
@@ -588,18 +590,22 @@ body.role-guest .guest-readonly-note { display: block; }
     <button class="tab active" data-page="record">기록 · Record</button>
     <button class="tab" data-page="history">회차 · Visits</button>
     <button class="tab" data-page="manderley">맨덜리 · Manderley</button>
+    <span class="nav-sep" aria-hidden="true"></span>
     <button class="tab" data-page="stats">통계 · Cast</button>
     <button class="tab" data-page="roles">배역 · Roles</button>
     <button class="tab" data-page="interactions">인터랙션 통계 · Interactions</button>
+    <span class="nav-sep" aria-hidden="true"></span>
     <button class="tab" data-page="casting">캐스팅 · Casting</button>
     <button class="tab" data-page="scenes">장면 풀 · Scenes</button>
     <button class="tab" data-page="pairing">페어링 · Pairing</button>
     <button class="tab" data-page="performers">퍼포머 · Performers</button>
     <button class="tab" data-page="favorites">색상 · Tags</button>
+    <span class="nav-sep" aria-hidden="true"></span>
     <button class="tab" data-page="data">데이터 · Archive</button>
   </nav>
 
   <div class="page active" id="page-record">
+    <div id="insightCard" style="display:none;"></div>
     <div class="record-grid">
       <div class="form-card">
         <h3>New Entry</h3>
@@ -1171,13 +1177,25 @@ function reorderCharacters(chars) {
 // These should be cleaned out from any migrated state.scenes (visit entries still preserve them).
 const DEPRECATED_SCENE_IDS = new Set(['i33']);  // i33 was a duplicate of o31; merged
 
+// Persisted ids of user-deleted SEED scenes — so mergeNewSeedScenes doesn't resurrect them each load.
+function getDeletedSceneIds() {
+  try { return new Set(JSON.parse(localStorage.getItem(STORAGE_KEY + '_delscenes') || '[]')); }
+  catch (e) { return new Set(); }
+}
+function addDeletedSceneId(id) {
+  const s = getDeletedSceneIds(); s.add(id);
+  try { localStorage.setItem(STORAGE_KEY + '_delscenes', JSON.stringify([...s])); } catch (e) {}
+}
+
 function mergeNewSeedScenes(existingScenes) {
   const seedById = {};
   SEED_DATA.scenes.forEach(s => { seedById[s.id] = s; });
+  // Deprecated + user-deleted seed scenes — never re-add or keep these
+  const removed = new Set([...DEPRECATED_SCENE_IDS, ...getDeletedSceneIds()]);
 
-  // Remove deprecated scenes from existing
+  // Remove deprecated / user-deleted scenes from existing
   let updated = existingScenes
-    .filter(s => !DEPRECATED_SCENE_IDS.has(s.id))
+    .filter(s => !removed.has(s.id))
     .map(s => {
       const seed = seedById[s.id];
       if (seed) {
@@ -1198,7 +1216,7 @@ function mergeNewSeedScenes(existingScenes) {
   // Add any seed scenes that don't exist
   const existingIds = new Set(updated.map(s => s.id));
   SEED_DATA.scenes.forEach(seed => {
-    if (!existingIds.has(seed.id)) {
+    if (!existingIds.has(seed.id) && !removed.has(seed.id)) {
       const newScene = {
         id: seed.id,
         type: seed.type,
@@ -1596,14 +1614,25 @@ function getSceneActors(scene) {
   return scene ? scene.actors : [];
 }
 
+let _numMapCache = null, _numMapSig = null;
 function getVisitNumMap() {
-  const chronological = [...state.visits].sort(compareVisitsChrono);
+  const visits = state.visits;
+  // cheap signature over every field compareVisitsChrono / output depends on
+  let sig = visits.length + ';';
+  for (let i = 0; i < visits.length; i++) {
+    const v = visits[i];
+    sig += v.id + '|' + (v.date || '') + '|' + (v.matinee || '') + '|' + (v.perfNum || 0) + '|' + (v.isLegacy ? 1 : 0) + ';';
+  }
+  if (_numMapCache && sig === _numMapSig) return _numMapCache;
+  const chronological = [...visits].sort(compareVisitsChrono);
   const numMap = {};
   let n = 1;
   chronological.forEach(v => {
     if (v.isLegacy) numMap[v.id] = 'L';
     else { numMap[v.id] = n; n++; }
   });
+  _numMapSig = sig;
+  _numMapCache = numMap;
   return numMap;
 }
 
@@ -4737,6 +4766,7 @@ function renderScenePool() {
         : `'${scene.role}' 장면을 삭제할까요?`;
       if (!confirm(msg)) return;
       state.scenes = state.scenes.filter(s => s.id !== sceneId);
+      if (SEED_DATA.scenes.some(ss => ss.id === sceneId)) addDeletedSceneId(sceneId);  // remember so the seed won't re-add it
       saveState();
       queueScenePush(sceneId);  // pushes delete since scene no longer in state
       renderScenePool();
@@ -5828,6 +5858,7 @@ $('#deleteLegacy').addEventListener('click', () => {
 $('#deleteCache').addEventListener('click', () => {
   if (confirm('이 기기의 로컬 캐시를 초기화합니다.\n클라우드 계정 데이터는 유지됩니다.\n(로그인 후 다시 불러와집니다)')) {
     localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(STORAGE_KEY + '_delscenes');
     localStorage.removeItem(PUSH_QUEUE_KEY);
     OLD_KEYS.forEach(k => localStorage.removeItem(k));
     showToast('캐시 초기화 완료 — 페이지를 새로고침하세요');
@@ -5872,6 +5903,7 @@ $('#resetPool').addEventListener('click', () => {
 
 $('#resetScenes').addEventListener('click', () => {
   if (confirm('장면 풀을 기본값으로 되돌릴까요? (사용자가 추가한 장면은 제거되지만, 회차 기록 자체는 유지)')) {
+    try { localStorage.removeItem(STORAGE_KEY + '_delscenes'); } catch (e) {}
     state.scenes = defaultScenes();
     saveState();
     showToast('장면 풀 복원됨');
@@ -6394,8 +6426,85 @@ function importWatchExcel(file) {
   reader.readAsArrayBuffer(file);
 }
 
+function openHelp() {
+  const html = `
+    <div style="font-size:13px; line-height:1.7; color:var(--ink-dim);">
+      <p style="margin-bottom:12px;"><strong style="color:var(--ink);">이 앱은?</strong> McKithan Hotel(슬립 노 모어) 관극 기록 도구입니다. 공연 전체(시드)가 이미 들어있고, <strong>내가 본 회차와 만남</strong>을 표시·기록합니다.</p>
+      <div style="margin-bottom:12px;">
+        <div style="font-family:var(--mono); font-size:10px; letter-spacing:0.2em; color:var(--gold); text-transform:uppercase; margin-bottom:4px;">핵심 개념</div>
+        · <strong>시드 = 전체 공연</strong> (공식 캐스팅 포함, 이미 등록됨)<br>
+        · <strong>관극 = 내가 본 회차</strong> (체크하면 통계에 반영)<br>
+        · <strong>만남 = 그날 받은 1:1 / 인터랙션 / 워크아웃</strong> (배우는 그날 캐스팅에서 자동 채움)
+      </div>
+      <div style="margin-bottom:12px;">
+        <div style="font-family:var(--mono); font-size:10px; letter-spacing:0.2em; color:var(--gold); text-transform:uppercase; margin-bottom:4px;">빠른 시작</div>
+        <strong>대량 등록</strong> — 데이터 탭 → "대량 관극 기록" → 체크리스트에서 본 회차 체크 (또는 붙여넣기 / 엑셀).<br>
+        <strong>한 건 기록</strong> — 기록 탭 → 회차 선택 → 만난 장면 체크 → 저장 (관극 여부 팝업).
+      </div>
+      <div style="margin-bottom:12px;">
+        <div style="font-family:var(--mono); font-size:10px; letter-spacing:0.2em; color:var(--gold); text-transform:uppercase; margin-bottom:4px;">탭 안내</div>
+        · <strong>기록 / 회차</strong> 입력·조회 · <strong>맨덜리</strong> 3층 스핀오프<br>
+        · <strong>통계 / 배역 / 인터랙션 / 페어링</strong> 분석 (배역 탭 = 컴플리션 진행률)<br>
+        · <strong>캐스팅 / 장면 풀 / 퍼포머 / 색상</strong> 관리 · <strong>데이터</strong> 대량입력·백업
+      </div>
+      <div>
+        <div style="font-family:var(--mono); font-size:10px; letter-spacing:0.2em; color:var(--gold); text-transform:uppercase; margin-bottom:4px;">팁</div>
+        · 검색에 <code style="background:var(--paper-deep);border:1px solid var(--rule);padding:1px 5px;">Fate Witch = Haley Sung</code> 처럼 <strong>역할 = 배우 페어 검색</strong> 가능<br>
+        · 배우 이름 옆 점을 눌러 <strong>색상 태그</strong> · 상단 <strong>↶ UNDO</strong>로 되돌리기<br>
+        · 모든 기록은 이 브라우저 + 클라우드에 저장됩니다 (로그인 필요).
+      </div>
+    </div>`;
+  openModal('도움말 · 사용법', 'McKithan Hotel · Find My Records', html);
+}
+$('#helpBtn') && $('#helpBtn').addEventListener('click', openHelp);
+
+function renderInsights() {
+  const el = $('#insightCard');
+  if (!el) return;
+  const watched = getWatchedCount();
+  if (!currentUser || watched === 0) { el.style.display = 'none'; el.innerHTML = ''; return; }
+
+  // personal encounters from watched, non-legacy visits
+  const wVisits = state.visits.filter(v => !v.isLegacy && v.isWatched);
+  const encCount = {};
+  let totalEnc = 0;
+  wVisits.forEach(v => (v.entries || []).forEach(e => {
+    splitActorString(e.actor).forEach(a => {
+      a = (a || '').trim();
+      if (!a || ONE_TIMERS.has(a)) return;
+      encCount[a] = (encCount[a] || 0) + 1; totalEnc++;
+    });
+  }));
+  const encEntries = Object.entries(encCount);
+  const uniqueMet = encEntries.length;
+  const topMet = encEntries.slice().sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0];
+
+  // rarest meeting: met performer with the lowest overall appearance rate (one-timers excluded)
+  const globalStats = getPerformerStats('performances');
+  const totalPerf = getPerformanceCount() || 1;
+  let rare = null, rareP = Infinity;
+  encEntries.forEach(([name]) => {
+    if (ONE_TIMERS.has(name)) return;
+    const g = globalStats[name];
+    const p = g ? g.perfCount / totalPerf : 0;
+    if (p > 0 && p < rareP) { rareP = p; rare = name; }
+  });
+
+  const card = (num, label, detail) =>
+    `<div class="stat-card"><div class="stat-num">${num}</div><div class="stat-label">${label}</div><div class="stat-detail">${detail}</div></div>`;
+  el.style.display = '';
+  el.innerHTML = `
+    <div class="section-rule" style="margin: 0 0 18px;"><div class="line"></div><div class="ornament">\u2726</div><div class="line"></div></div>
+    <div class="stats-grid" style="margin-bottom: 36px;">
+      ${card(watched, '\uad00\uadf9 \u00b7 Visits', '\uc804\uccb4 \uad00\uadf9 \ud68c\ucc28')}
+      ${card(uniqueMet, '\ub9cc\ub09c \ubc30\uc6b0 \u00b7 Met', totalEnc + '\ud68c \ub9cc\ub0a8')}
+      ${card(topMet ? '\u00d7' + topMet[1] : '\u2014', '\ucd5c\ub2e4 \ub9cc\ub0a8 \u00b7 Most Met', topMet ? escapeHtml(topMet[0]) : '\uc544\uc9c1 \uc5c6\uc74c')}
+      ${card(rare ? (rareP * 100).toFixed(1) + '%' : '\u2014', '\ud76c\uadc0\ud55c \ub9cc\ub0a8 \u00b7 Rarest', rare ? escapeHtml(rare) + ' \u00b7 \uc804\uccb4 \ub4f1\uc7a5\ub960' : '\u2014')}
+    </div>`;
+}
+
 function renderActive(page) {
-  if (page === 'record') { renderScenes(); renderCastingInputs(); populateVisitSelector(); }
+  if (page === 'record') { renderScenes(); renderCastingInputs(); populateVisitSelector(); renderInsights(); }
   else if (page === 'history') renderHistory();
   else if (page === 'manderley') renderManderley();
   else if (page === 'stats') renderStats();
