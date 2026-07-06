@@ -614,7 +614,7 @@ body.role-guest .guest-readonly-note { display: block; }
           <select id="visitSelector">
             <option value="__new__">+ 신규 회차로 기록</option>
           </select>
-          <div class="hint" style="font-size: 11px; margin-top: 4px;">전체 공연 회차에서 선택하면 그 회차에 만남이 추가됩니다. "신규 회차"는 시드에 없는 새 공연용.</div>
+          <div class="hint" style="font-size: 11px; margin-top: 4px;">전체 공연 회차에서 선택하면 그 회차에 인카운터이 추가됩니다. "신규 회차"는 시드에 없는 새 공연용.</div>
         </div>
         <div class="field"><label>Date · 날짜</label><input type="date" id="visitDate"></div>
         <div class="field"><label>매티네 / 이브닝</label>
@@ -632,7 +632,7 @@ body.role-guest .guest-readonly-note { display: block; }
 
       <div class="scenes-panel">
         <h3>Encounters</h3>
-        <div class="sub">Select what unfolded · 만난 장면을 체크하세요</div>
+        <div class="sub">Select what unfolded · 인카운터 장면을 체크하세요</div>
         <div class="scene-filter">
           <input type="text" id="sceneSearch" placeholder="배역명 또는 배우명 검색…">
           <button class="pill active" data-type="all">전체</button>
@@ -731,7 +731,7 @@ body.role-guest .guest-readonly-note { display: block; }
     <div class="section-rule"><div class="line"></div><div class="ornament">✦</div><div class="line"></div></div>
     <div class="casting-intro" style="margin-bottom: 20px;">
       The Manderley Experience는 별도 공연이 아니라, 본 공연의 <strong>3rd 루프에 맨덜리바에서 진행되는 스핀오프 입장 형태</strong>입니다 (2026년 6월 4일 시작).
-      이 화면은 <strong>The Manderley Experience로 관람한 회차만 모아 보는 필터 뷰</strong>입니다. 가능한 만남은 <strong>맨덜리바 술 시중</strong>과 <strong>맨덜리바 3:1</strong>이며, 두 장면은 일반 관객도 만날 수 있습니다.
+      이 화면은 <strong>The Manderley Experience로 관람한 회차만 모아 보는 필터 뷰</strong>입니다. 가능한 인카운터은 <strong>맨덜리바 술 시중</strong>과 <strong>맨덜리바 3:1</strong>이며, 두 장면은 일반 관객도 만날 수 있습니다.
     </div>
 
     <div class="history-controls" data-auth-only style="margin-bottom: 16px;">
@@ -764,7 +764,7 @@ body.role-guest .guest-readonly-note { display: block; }
       <input type="text" id="statsSearch" placeholder="배우명 검색…" style="flex: 1; min-width: 200px;">
       <select id="statsView">
         <option value="performer">배우별 출연 (공연 횟수)</option>
-        <option value="encounter">만남별 (1:1/인터랙션/워크아웃)</option>
+        <option value="encounter">인카운터별 (1:1/인터랙션/워크아웃)</option>
       </select>
       <select id="statsType" style="display:none;">
         <option value="all">전체 (1:1 + 인터랙션 + 워크아웃)</option>
@@ -993,27 +993,27 @@ body.role-guest .guest-readonly-note { display: block; }
       <h3>대량 관극 기록</h3>
       <div class="excel-sub">Bulk watched + encounters</div>
       <div class="excel-desc">
-        이미 등록된 공연(시드)에 대해 <strong>내가 본 회차</strong>와 <strong>그날 본 만남</strong>을 한 번에 기록합니다.
+        이미 등록된 공연(시드)에 대해 <strong>내가 본 회차</strong>와 <strong>그날 본 인카운터</strong>을 한 번에 기록합니다.
         배우는 그날 캐스팅에서 <strong>자동으로 채워집니다</strong> — 어떤 장면을 봤는지만 지정하면 됩니다.
       </div>
       <div id="bulkWatchBody"></div>
     </div>
 
     <details class="excel-section">
-      <summary style="cursor:pointer; font-family:var(--serif-display); font-size:18px; font-style:italic; color:var(--ink-dim); list-style:none;">▸ 고급 · 엑셀 캐스팅/만남 일괄 입력 <span style="font-family:var(--mono); font-size:10px; color:var(--ink-faint);">(관리자용 · 대부분 '대량 관극 기록' 사용)</span></summary>
+      <summary style="cursor:pointer; font-family:var(--serif-display); font-size:18px; font-style:italic; color:var(--ink-dim); list-style:none;">▸ 고급 · 엑셀 캐스팅/인카운터 일괄 입력 <span style="font-family:var(--mono); font-size:10px; color:var(--ink-faint);">(관리자용 · 대부분 '대량 관극 기록' 사용)</span></summary>
       <h3 style="display:none;">엑셀로 일괄 입력</h3>
       <div class="excel-sub">Bulk Import via Excel</div>
       <div class="excel-desc">
         두 가지 템플릿을 다운로드해 채워 넣고 업로드하세요.<br>
         <strong>① 캐스팅 시트</strong>: 행=회차, 열=캐릭터. 각 셀에 배우명을 입력. 빈 셀은 무시됩니다.<br>
-        <strong>② 만남 시트(Encounters)</strong>: 회차마다 어떤 1:1/인터랙션/워크아웃을 누구로 봤는지 행 단위로 입력.<br>
+        <strong>② 인카운터 시트(Encounters)</strong>: 회차마다 어떤 1:1/인터랙션/워크아웃을 누구로 봤는지 행 단위로 입력.<br>
         업로드 전에 미리보기로 확인할 수 있어요. 이미 같은 날짜·번호 회차가 있으면 <code>업데이트</code>되고, 없으면 <code>새로 생성</code>됩니다.
       </div>
       <div class="excel-actions">
         <button id="dlCastingTemplate">캐스팅 템플릿 다운로드</button>
-        <button id="dlEncountersTemplate">만남 템플릿 다운로드</button>
+        <button id="dlEncountersTemplate">인카운터 템플릿 다운로드</button>
         <button id="uploadCasting" class="primary">캐스팅 업로드</button>
-        <button id="uploadEncounters" class="primary">만남 업로드</button>
+        <button id="uploadEncounters" class="primary">인카운터 업로드</button>
         <input type="file" id="castingFile" accept=".xlsx,.xls" style="display:none;">
         <input type="file" id="encountersFile" accept=".xlsx,.xls" style="display:none;">
       </div>
@@ -2404,7 +2404,7 @@ $('#saveVisit').addEventListener('click', async () => {
     // Append entries to an existing visit (and mark as watched)
     const v = state.visits.find(x => x.id === visitChoice);
     if (!v) { showToast('회차를 찾을 수 없습니다'); return; }
-    snapshotForUndo(`#${v.perfNum || ''} 회차 만남 기록`);
+    snapshotForUndo(`#${v.perfNum || ''} 회차 인카운터 기록`);
     // selectedScenes already holds the full set (existing entries were loaded in on
     // selection), so REPLACE rather than append — this prevents duplicate encounters.
     v.entries = entries;
@@ -2439,7 +2439,7 @@ $('#saveVisit').addEventListener('click', async () => {
     } else {
       queueVisitStatePush(v.id);
     }
-    showToast(`#${v.perfNum || ''} 회차에 만남 ${entries.length}개 기록됨`);
+    showToast(`#${v.perfNum || ''} 회차에 인카운터 ${entries.length}개 기록됨`);
   }
 
   saveState();
@@ -2577,7 +2577,7 @@ function renderManderley() {
   list.innerHTML = visits.map(v => {
     const isEditing = mandEditMode === v.id;
     const entriesHtml = (v.entries || []).length === 0
-      ? `<div style="color: var(--ink-faint); font-style: italic; font-size: 13px; padding: 4px 0;">기록된 만남 없음</div>`
+      ? `<div style="color: var(--ink-faint); font-style: italic; font-size: 13px; padding: 4px 0;">기록된 인카운터 없음</div>`
       : (v.entries || []).map((e, idx) => {
           const scene = getSceneById(e.sceneId);
           const roleName = scene ? scene.role : '(삭제된 장면)';
@@ -2637,7 +2637,7 @@ function renderManderley() {
             <div style="font-family:var(--mono); font-size:11px; color:var(--ink-faint); margin-top:4px;">${(v.entries||[]).length} encounters${v.notes ? ' · ' + escapeHtml(v.notes) : ''}</div>
           </div>
           <div style="display:flex; gap:6px; flex-wrap:wrap;" data-auth-only>
-            <button class="mini-btn mand-edit" data-vid="${escapeHtml(v.id)}">${isEditing ? '편집 중' : '만남 편집'}</button>
+            <button class="mini-btn mand-edit" data-vid="${escapeHtml(v.id)}">${isEditing ? '편집 중' : '인카운터 편집'}</button>
             <button class="mini-btn mand-unflag" data-vid="${escapeHtml(v.id)}" title="이 회차의 Manderley 관람 표시를 해제합니다">표시 해제</button>
           </div>
         </div>
@@ -2711,7 +2711,7 @@ function wireManderleyCardEvents() {
     if (guardGuest()) return;
     const v = state.visits.find(x => x.id === b.dataset.vid);
     if (!v) return;
-    if (!confirm(`${v.date} 회차의 The Manderley Experience 관람 표시를 해제할까요? (만남 기록은 유지됩니다)`)) return;
+    if (!confirm(`${v.date} 회차의 The Manderley Experience 관람 표시를 해제할까요? (인카운터 기록은 유지됩니다)`)) return;
     snapshotForUndo('Manderley 표시 해제');
     v.watchedAsManderley = false;
     touchVisit(v);
@@ -2741,28 +2741,28 @@ function wireManderleyCardEvents() {
     }
     // Prevent duplicate identical encounter
     if ((v.entries || []).some(e => e.sceneId === sceneId && e.actor === actor)) {
-      showToast('이미 기록된 만남입니다'); return;
+      showToast('이미 기록된 인카운터입니다'); return;
     }
-    snapshotForUndo('Manderley 만남 추가');
+    snapshotForUndo('Manderley 인카운터 추가');
     v.entries = [...(v.entries || []), { sceneId, actor }];
     touchVisit(v);
     queueManderleyPush(v);
     saveState();
     renderManderley();
-    showToast('만남이 추가되었습니다');
+    showToast('인카운터이 추가되었습니다');
   }));
   $$('.mand-entry-del').forEach(b => b.addEventListener('click', () => {
     if (guardGuest()) return;
     const v = state.visits.find(x => x.id === b.dataset.vid);
     if (!v) return;
     const idx = parseInt(b.dataset.eidx);
-    snapshotForUndo('Manderley 만남 삭제');
+    snapshotForUndo('Manderley 인카운터 삭제');
     v.entries.splice(idx, 1);
     touchVisit(v);
     queueManderleyPush(v);
     saveState();
     renderManderley();
-    showToast('만남 삭제됨');
+    showToast('인카운터 삭제됨');
   }));
 }
 
@@ -2822,7 +2822,7 @@ function renderHistory() {
       list.innerHTML = `
         <div class="empty-onboard" style="padding: 56px 24px; text-align: center;">
           <div style="font-family: var(--serif-display); font-size: 22px; font-style: italic; color: var(--ink-dim); margin-bottom: 12px;">아직 기록된 회차가 없습니다</div>
-          <div style="color: var(--ink-faint); font-size: 13px; line-height: 1.7; max-width: 380px; margin: 0 auto 24px;">McKITHAN HOTEL에서의 첫 밤을 기록해보세요. 본 장면과 만난 배우, 캐스팅을 남기면 이곳에 차곡차곡 쌓입니다.</div>
+          <div style="color: var(--ink-faint); font-size: 13px; line-height: 1.7; max-width: 380px; margin: 0 auto 24px;">McKITHAN HOTEL에서의 첫 밤을 기록해보세요. 본 장면과 인카운터한 배우, 캐스팅을 남기면 이곳에 차곡차곡 쌓입니다.</div>
           <button class="btn" id="gotoRecordFromEmpty" style="display: inline-block; width: auto; padding: 12px 28px;">첫 회차 기록하기 →</button>
         </div>`;
       const goBtn = document.getElementById('gotoRecordFromEmpty');
@@ -3009,7 +3009,7 @@ function renderHistory() {
         : `<button class="mini-btn" data-edit-meta="${v.id}">정보 수정</button>`;
       const entryEditBtn = isEntryEditable
         ? `<button class="mini-btn" data-stop-legacy="${v.id}">편집 종료</button>`
-        : (v.entries && v.entries.length > 0 ? `<button class="mini-btn" data-edit-legacy="${v.id}">만남 편집</button>` : '');
+        : (v.entries && v.entries.length > 0 ? `<button class="mini-btn" data-edit-legacy="${v.id}">인카운터 편집</button>` : '');
       actions = `<div class="visit-actions">
         ${watchBtn}
         ${mandBtn}
@@ -3130,7 +3130,7 @@ function renderHistory() {
             saveState(); renderHistory(); renderHeader(); showToast('내 기록이 비워졌습니다');
           }
         } else {
-          if (confirm('이 회차는 전체 공연 시드 데이터입니다.\n삭제 대신 본인 관극 기록(만남·관극 표시)만 비울까요?')) {
+          if (confirm('이 회차는 전체 공연 시드 데이터입니다.\n삭제 대신 본인 관극 기록(인카운터·관극 표시)만 비울까요?')) {
             snapshotForUndo('관극 기록 비움');
             v.entries = [];
             v.isWatched = false;
@@ -3194,7 +3194,7 @@ function renderHistory() {
       saveState();
       renderHistory();
       renderHeader();
-      showToast('표시 해제됨 (만남 기록은 유지)');
+      showToast('표시 해제됨 (인카운터 기록은 유지)');
     });
   });
   // Edit casting mode
@@ -3760,7 +3760,7 @@ function renderEncounterStats() {
 
   $('#topStats').innerHTML = `
     <div class="stat-card"><div class="stat-num">${totalViews}</div><div class="stat-label">Total Visits</div><div class="stat-detail">총 관극 횟수</div></div>
-    <div class="stat-card"><div class="stat-num">${totalEncounters}</div><div class="stat-label">Encounters</div><div class="stat-detail">${filterType === 'all' ? '전체' : filterType} 누적 만남</div></div>
+    <div class="stat-card"><div class="stat-num">${totalEncounters}</div><div class="stat-label">Encounters</div><div class="stat-detail">${filterType === 'all' ? '전체' : filterType} 누적 인카운터</div></div>
     <div class="stat-card"><div class="stat-num">${avgPerVisit}</div><div class="stat-label">Per Visit</div><div class="stat-detail">관극당 평균</div></div>
     <div class="stat-card"><div class="stat-num">${topActor ? topActor[1] : 0}</div><div class="stat-label">Most Seen</div><div class="stat-detail">${topActor ? escapeHtml(topActor[0]) : '—'}</div></div>
   `;
@@ -4762,7 +4762,7 @@ function renderScenePool() {
       const entriesCount = state.visits.reduce((sum, v) =>
         sum + v.entries.filter(e => e.sceneId === sceneId).length, 0);
       const msg = entriesCount > 0
-        ? `'${scene.role}' 장면을 삭제할까요?\n이미 기록된 ${entriesCount}개의 만남은 보존되지만, 이 카드는 더 이상 표시되지 않습니다.`
+        ? `'${scene.role}' 장면을 삭제할까요?\n이미 기록된 ${entriesCount}개의 인카운터은 보존되지만, 이 카드는 더 이상 표시되지 않습니다.`
         : `'${scene.role}' 장면을 삭제할까요?`;
       if (!confirm(msg)) return;
       state.scenes = state.scenes.filter(s => s.id !== sceneId);
@@ -5149,7 +5149,7 @@ function openActorModal(actor) {
 
   const content = `
     <div style="display: flex; flex-wrap: wrap; gap: 24px; margin-bottom: 24px; padding: 16px; background: var(--paper-raised); border: 1px solid var(--rule);">
-      <div><div style="font-family: var(--mono); font-size: 9px; color: var(--gold); letter-spacing: 0.2em;">총 만남</div><div style="font-family: var(--serif-display); font-size: 28px; font-style: italic;">${count}</div></div>
+      <div><div style="font-family: var(--mono); font-size: 9px; color: var(--gold); letter-spacing: 0.2em;">총 인카운터</div><div style="font-family: var(--serif-display); font-size: 28px; font-style: italic;">${count}</div></div>
       <div><div style="font-family: var(--mono); font-size: 9px; color: var(--gold); letter-spacing: 0.2em;">만날 확률</div><div style="font-family: var(--serif-display); font-size: 28px; font-style: italic;">${prob}%</div></div>
       <div><div style="font-family: var(--mono); font-size: 9px; color: var(--gold); letter-spacing: 0.2em;">고유 배역</div><div style="font-family: var(--serif-display); font-size: 28px; font-style: italic;">${new Set(encounters.map(e => e.scene && e.scene.id).filter(Boolean)).size}</div></div>
     </div>
@@ -5209,7 +5209,7 @@ function openRoleModal(sceneId) {
       }).join('')}
     </div>
     <div>
-      <div style="font-family: var(--mono); font-size: 10px; color: var(--gold); letter-spacing: 0.24em; text-transform: uppercase; margin-bottom: 8px;">만난 이력 (시간순)</div>
+      <div style="font-family: var(--mono); font-size: 10px; color: var(--gold); letter-spacing: 0.24em; text-transform: uppercase; margin-bottom: 8px;">인카운터 이력 (시간순)</div>
       ${encounters.length === 0 ? '<div style="color: var(--ink-faint); font-style: italic;">아직 받지 못함</div>' :
         encounters.map(e => `<div class="modal-history-item"><div class="who">${getActorDotHtml(e.actor)}${escapeHtml(e.actor)}</div><div class="when">${escapeHtml(e.when)}</div></div>`).join('')}
     </div>
@@ -5309,7 +5309,7 @@ function downloadEncountersTemplate() {
   XLSX.utils.book_append_sheet(wb, refWs, 'Scene Reference');
 
   XLSX.writeFile(wb, `encounters_template_${new Date().toISOString().slice(0,10)}.xlsx`);
-  showToast('만남 템플릿 다운로드 완료');
+  showToast('인카운터 템플릿 다운로드 완료');
 }
 
 function parseExcelFile(file) {
@@ -5585,11 +5585,11 @@ function importEncounters(file) {
     }).join('');
 
     showPreview(`
-      <div class="preview-title">만남 업로드 미리보기</div>
+      <div class="preview-title">인카운터 업로드 미리보기</div>
       <div class="preview-stats">
         <div class="preview-stat"><strong>${plan.length}</strong> 회차</div>
         <div class="preview-stat"><strong>${newCount}</strong> 신규 / <strong>${updateCount}</strong> 업데이트</div>
-        <div class="preview-stat"><strong>${totalEntries}</strong> 만남</div>
+        <div class="preview-stat"><strong>${totalEntries}</strong> 인카운터</div>
         ${newScenes.length > 0 ? `<div class="preview-stat"><strong>${newScenes.length}</strong> 새 장면</div>` : ''}
       </div>
       ${newScenes.length > 0 ? `
@@ -5606,7 +5606,7 @@ function importEncounters(file) {
         </div>
       ` : ''}
       <table>
-        <thead><tr><th>날짜</th><th>처리</th><th>만남</th><th>비고</th></tr></thead>
+        <thead><tr><th>날짜</th><th>처리</th><th>인카운터</th><th>비고</th></tr></thead>
         <tbody>${previewRows}</tbody>
       </table>
       ${plan.length > 10 ? `<div style="margin-top: 10px; color: var(--ink-faint); font-size: 12px;">… 외 ${plan.length - 10}건</div>` : ''}
@@ -5667,7 +5667,7 @@ function importEncounters(file) {
       saveState();
       hidePreview();
       renderHeader();
-      showToast(`완료: 신규 ${savedNew}건, 업데이트 ${savedUpdate}건 (${totalEnc} 만남)${skipped ? `, 건너뜀 ${skipped}건` : ''}`);
+      showToast(`완료: 신규 ${savedNew}건, 업데이트 ${savedUpdate}건 (${totalEnc} 인카운터)${skipped ? `, 건너뜀 ${skipped}건` : ''}`);
     });
     $('#cancelEncImport').addEventListener('click', hidePreview);
   }).catch(err => {
@@ -5868,7 +5868,7 @@ $('#deleteCache').addEventListener('click', () => {
 
 $('#deleteAccount').addEventListener('click', async () => {
   if (guardGuest()) return;
-  if (!confirm('경고: 내 계정의 모든 기록을 영구 삭제합니다.\n관극 기록·만남·메모·태그가 모두 사라집니다.\n시드 공연 데이터(날짜·캐스팅 원본)는 유지됩니다.')) return;
+  if (!confirm('경고: 내 계정의 모든 기록을 영구 삭제합니다.\n관극 기록·인카운터·메모·태그가 모두 사라집니다.\n시드 공연 데이터(날짜·캐스팅 원본)는 유지됩니다.')) return;
   if (!confirm('마지막 확인: 정말로 계정 기록을 삭제할까요? 되돌릴 수 없습니다.')) return;
   const uid = currentUser.id;
   try {
@@ -6106,7 +6106,7 @@ function renderBWPreview(box, resolved) {
     <div class="preview-title">미리보기</div>
     <div class="preview-stats">
       <div class="preview-stat">회차 매칭 <strong>${okVisits}</strong> / 실패 <strong>${failVisits}</strong></div>
-      <div class="preview-stat">만남 매칭 <strong>${okScenes}</strong> / 실패 <strong>${failScenes}</strong></div>
+      <div class="preview-stat">인카운터 매칭 <strong>${okScenes}</strong> / 실패 <strong>${failScenes}</strong></div>
     </div>
     ${(failVisits || failScenes) ? `<div class="warning-list"><div class="warn-title">⚠ 실패 항목은 반영되지 않습니다</div>날짜는 <code>YYYY-MM-DD</code>, 같은 날 2회차면 마티네/이브닝을 함께, 장면명은 장면목록 참고.</div>` : ''}
     <div style="max-height:320px; overflow-y:auto; margin-top:10px;">${rows || '<div style="color:var(--ink-faint); font-style:italic;">해석할 내용이 없습니다.</div>'}</div>
@@ -6150,7 +6150,7 @@ function applyBulkWatch(resolved) {
   const box = $('#bulkWatchPreview');
   if (box) { box.classList.remove('open'); box.innerHTML = ''; }
   renderBulkWatch();
-  showToast(`관극 ${watchedN}회차 · 만남 ${encN}개 반영됨`);
+  showToast(`관극 ${watchedN}회차 · 인카운터 ${encN}개 반영됨`);
 }
 
 // ---------- Checklist mode ----------
@@ -6170,7 +6170,7 @@ function renderBulkChecklist() {
       </label>
       <button class="mini-btn" id="bwExcel" style="padding:8px 14px;">엑셀 다운로드</button>
     </div>
-    <div style="font-size:12px; color:var(--ink-faint); font-style:italic; margin-bottom:10px;">체크 = 관극 표시. 회차의 <strong>만남 ▾</strong>을 열어 그날 본 장면을 체크하면 배우가 자동 입력됩니다.</div>
+    <div style="font-size:12px; color:var(--ink-faint); font-style:italic; margin-bottom:10px;">체크 = 관극 표시. 회차의 <strong>인카운터 ▾</strong>을 열어 그날 본 장면을 체크하면 배우가 자동 입력됩니다.</div>
     <div id="bwList"></div>`;
   const s = $('#bwSearch'); if (s) s.addEventListener('input', renderBwList);
   const u = $('#bwOnlyUnwatched'); if (u) u.addEventListener('change', renderBwList);
@@ -6221,7 +6221,7 @@ function bwRowHtml(v, numMap) {
           <span style="font-family:var(--mono); font-size:12px; color:var(--ink-dim);">${escapeHtml(v.date || '날짜없음')}${v.matinee ? ' · ' + escapeHtml(v.matinee) : ''}</span>
           ${v.isWatched ? '<span style="font-family:var(--mono); font-size:9px; color:var(--blood-bright); letter-spacing:0.2em;">관극</span>' : ''}
         </label>
-        <button class="mini-btn" data-bw-expand="${escapeHtml(v.id)}" style="padding:5px 10px;">만남 ${encCount ? '(' + encCount + ') ' : ''}${isOpen ? '▴' : '▾'}</button>
+        <button class="mini-btn" data-bw-expand="${escapeHtml(v.id)}" style="padding:5px 10px;">인카운터 ${encCount ? '(' + encCount + ') ' : ''}${isOpen ? '▴' : '▾'}</button>
       </div>
       ${isOpen ? `<div style="padding:0 14px 12px 14px; border-top:1px dotted var(--rule);">${bwEncoderHtml(v)}</div>` : ''}
     </div>`;
@@ -6269,7 +6269,7 @@ function wireBwList() {
     const v = state.visits.find(x => x.id === cb.dataset.bwEnc);
     const scene = getSceneById(cb.dataset.scene);
     if (!v || !scene) return;
-    snapshotForUndo('만남 기록 변경');
+    snapshotForUndo('인카운터 기록 변경');
     if (cb.checked) {
       const actor = autoActorForScene(scene, v);
       if (!(v.entries || []).some(e => e.sceneId === scene.id && e.actor === actor)) {
@@ -6296,7 +6296,7 @@ function wireBwList() {
     const mo = b.dataset.bwMonthOff;
     const targets = state.visits.filter(v => !v.isLegacy && (v.date || '').slice(0, 7) === mo && v.isWatched);
     if (!targets.length) { showToast('해제할 관극 표시가 없습니다'); return; }
-    if (!confirm(`${mo} 관극 표시 ${targets.length}건을 모두 해제할까요? (만남 기록은 유지됩니다)`)) return;
+    if (!confirm(`${mo} 관극 표시 ${targets.length}건을 모두 해제할까요? (인카운터 기록은 유지됩니다)`)) return;
     snapshotForUndo('이 달 전체 관극 해제');
     targets.forEach(v => { v.isWatched = false; bwSyncVisit(v); });
     saveState(); renderHeader(); renderBwList();
@@ -6317,7 +6317,7 @@ function exportBulkWatchExcel() {
     ('#' + numMap[v.id]).includes(term) ||
     String(numMap[v.id]) === term ||
     (v.matinee || '').includes(term));
-  const rows = [['#', '날짜', '회차', '관극', '만남수', '만남 (장면 = 배우)']];
+  const rows = [['#', '날짜', '회차', '관극', '인카운터수', '인카운터 (장면 = 배우)']];
   visits.forEach(v => {
     const encs = (v.entries || []).map(e => {
       const sc = getSceneById(e.sceneId);
@@ -6341,7 +6341,7 @@ function renderBulkWatchExcel() {
   wrap.innerHTML = `
     <div class="excel-desc" style="margin-bottom:10px;">
       <strong>가장 쉬운 방법</strong> — 템플릿을 내려받으면 <strong>모든 회차가 이미 #번호·날짜·회차까지 적혀</strong> 있습니다.
-      본 회차 줄의 <code>관극</code> 칸에 <strong>O</strong>만 찍고(그날 본 장면이 있으면 <code>만남</code> 칸에 쉼표로), 업로드하세요.
+      본 회차 줄의 <code>관극</code> 칸에 <strong>O</strong>만 찍고(그날 본 장면이 있으면 <code>인카운터</code> 칸에 쉼표로), 업로드하세요.
       <br>빈칸은 건드리지 않습니다(관극 표시 <strong>추가만</strong>). 배우는 그날 캐스팅에서 자동 채움. 업로드 후 미리보기 → 확정.
     </div>
     <div class="excel-actions">
@@ -6359,7 +6359,7 @@ function downloadWatchTemplate() {
   if (typeof XLSX === 'undefined') { showToast('엑셀 모듈 로드 실패 — 네트워크 확인'); return; }
   const numMap = getVisitNumMap();
   const visits = state.visits.filter(v => !v.isLegacy).sort(compareVisitsChrono);
-  const rows = [['관극', '#', '날짜', '회차', '만남 (쉼표로 여러 개)']];
+  const rows = [['관극', '#', '날짜', '회차', '인카운터 (쉼표로 여러 개)']];
   visits.forEach(v => {
     const encs = (v.entries || []).map(e => { const sc = getSceneById(e.sceneId); return sc ? sc.role : ''; }).filter(Boolean);
     rows.push([v.isWatched ? 'O' : '', numMap[v.id], v.date || '', v.matinee || '', encs.join(', ')]);
@@ -6392,7 +6392,7 @@ function importWatchExcel(file) {
     const cNum = findCol(/^#$|번호|num/i);
     const cDate = findCol(/날짜|date/i);
     const cMat = findCol(/회차|마티네|이브닝|matinee|session/i);
-    const cEnc = findCol(/만남|장면|encounter/i);
+    const cEnc = findCol(/만남|인카운터|장면|encounter/i);
     const numMap = getVisitNumMap();
     const byNum = {};
     state.visits.forEach(v => { if (!v.isLegacy) byNum[numMap[v.id]] = v; });
@@ -6418,7 +6418,7 @@ function importWatchExcel(file) {
       }) : [];
       resolved.push({ date: visit ? visit.date : '', matinee: visit ? visit.matinee : '', visit, ambiguousDate: false, scenes });
     }
-    if (!resolved.length) { showToast('관극 표시(O)나 만남이 있는 줄이 없습니다'); return; }
+    if (!resolved.length) { showToast('관극 표시(O)나 인카운터이 있는 줄이 없습니다'); return; }
     renderBWPreview($('#bulkWatchExcelPreview'), resolved);
     showToast('미리보기 확인 후 확정하세요');
   };
@@ -6429,17 +6429,17 @@ function importWatchExcel(file) {
 function openHelp() {
   const html = `
     <div style="font-size:13px; line-height:1.7; color:var(--ink-dim);">
-      <p style="margin-bottom:12px;"><strong style="color:var(--ink);">이 앱은?</strong> McKithan Hotel(슬립 노 모어) 관극 기록 도구입니다. 공연 전체(시드)가 이미 들어있고, <strong>내가 본 회차와 만남</strong>을 표시·기록합니다.</p>
+      <p style="margin-bottom:12px;"><strong style="color:var(--ink);">이 앱은?</strong> McKithan Hotel(슬립 노 모어) 관극 기록 도구입니다. 공연 전체(시드)가 이미 들어있고, <strong>내가 본 회차와 인카운터</strong>을 표시·기록합니다.</p>
       <div style="margin-bottom:12px;">
         <div style="font-family:var(--mono); font-size:10px; letter-spacing:0.2em; color:var(--gold); text-transform:uppercase; margin-bottom:4px;">핵심 개념</div>
         · <strong>시드 = 전체 공연</strong> (공식 캐스팅 포함, 이미 등록됨)<br>
         · <strong>관극 = 내가 본 회차</strong> (체크하면 통계에 반영)<br>
-        · <strong>만남 = 그날 받은 1:1 / 인터랙션 / 워크아웃</strong> (배우는 그날 캐스팅에서 자동 채움)
+        · <strong>인카운터 = 그날 받은 1:1 / 인터랙션 / 워크아웃</strong> (배우는 그날 캐스팅에서 자동 채움)
       </div>
       <div style="margin-bottom:12px;">
         <div style="font-family:var(--mono); font-size:10px; letter-spacing:0.2em; color:var(--gold); text-transform:uppercase; margin-bottom:4px;">빠른 시작</div>
         <strong>대량 등록</strong> — 데이터 탭 → "대량 관극 기록" → 체크리스트에서 본 회차 체크 (또는 붙여넣기 / 엑셀).<br>
-        <strong>한 건 기록</strong> — 기록 탭 → 회차 선택 → 만난 장면 체크 → 저장 (관극 여부 팝업).
+        <strong>한 건 기록</strong> — 기록 탭 → 회차 선택 → 인카운터 장면 체크 → 저장 (관극 여부 팝업).
       </div>
       <div style="margin-bottom:12px;">
         <div style="font-family:var(--mono); font-size:10px; letter-spacing:0.2em; color:var(--gold); text-transform:uppercase; margin-bottom:4px;">탭 안내</div>
@@ -6497,9 +6497,9 @@ function renderInsights() {
     <div class="section-rule" style="margin: 0 0 18px;"><div class="line"></div><div class="ornament">\u2726</div><div class="line"></div></div>
     <div class="stats-grid" style="margin-bottom: 36px;">
       ${card(watched, '\uad00\uadf9 \u00b7 Visits', '\uc804\uccb4 \uad00\uadf9 \ud68c\ucc28')}
-      ${card(uniqueMet, '\ub9cc\ub09c \ubc30\uc6b0 \u00b7 Met', totalEnc + '\ud68c \ub9cc\ub0a8')}
-      ${card(topMet ? '\u00d7' + topMet[1] : '\u2014', '\ucd5c\ub2e4 \ub9cc\ub0a8 \u00b7 Most Met', topMet ? escapeHtml(topMet[0]) : '\uc544\uc9c1 \uc5c6\uc74c')}
-      ${card(rare ? (rareP * 100).toFixed(1) + '%' : '\u2014', '\ud76c\uadc0\ud55c \ub9cc\ub0a8 \u00b7 Rarest', rare ? escapeHtml(rare) + ' \u00b7 \uc804\uccb4 \ub4f1\uc7a5\ub960' : '\u2014')}
+      ${card(uniqueMet, '인카운터 배우 · Encountered', totalEnc + '회 인카운터')}
+      ${card(topMet ? '×' + topMet[1] : '—', '최다 인카운터 · Most Encountered', topMet ? escapeHtml(topMet[0]) : '아직 없음')}
+      ${card(rare ? (rareP * 100).toFixed(1) + '%' : '—', '드문 출연 · Rare Cast', rare ? escapeHtml(rare) + ' · 전체 등장률' : '—')}
     </div>`;
 }
 
