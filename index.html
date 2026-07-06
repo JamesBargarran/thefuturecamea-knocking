@@ -15,7 +15,7 @@
 :root {
   --ink: #f0ebe0;
   --ink-dim: #a89c85;
-  --ink-faint: #8a7d65;
+  --ink-faint: #9a8d72;
   --paper: #14110d;
   --paper-raised: #1c1813;
   --paper-deep: #0a0907;
@@ -53,6 +53,32 @@ nav { display: flex; gap: 0; margin-bottom: 40px; border-bottom: 1px solid var(-
 .tab { background: none; border: none; color: var(--ink-dim); font-family: var(--mono); font-size: 11px; letter-spacing: 0.24em; text-transform: uppercase; padding: 16px 24px; cursor: pointer; position: relative; transition: color 0.2s; font-weight: 400; }
 .tab:hover { color: var(--ink); }
 .tab.active { color: var(--ink); }
+.visit-cal { background: var(--paper-raised); border: 1px solid var(--rule); padding: 14px 16px; margin-bottom: 20px; }
+.cal-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+.cal-title { font-family: var(--serif-display); font-size: 17px; font-style: italic; color: var(--ink); }
+.cal-mcount { font-family: var(--mono); font-size: 10px; letter-spacing: 0.12em; color: var(--gold); font-style: normal; }
+.cal-head .cal-nav { padding: 4px 10px; }
+.cal-head .cal-nav[data-cal-nav="today"] { margin-left: auto; }
+.cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.cal-weekdays { margin-bottom: 4px; }
+.cal-wd { text-align: center; font-family: var(--mono); font-size: 9px; letter-spacing: 0.1em; color: var(--ink-faint); padding: 2px 0; text-transform: uppercase; }
+.cal-wd.cal-sun { color: var(--tag-red); }
+.cal-wd.cal-sat { color: var(--tag-azure); }
+.cal-cell { position: relative; min-height: 40px; border: 1px solid transparent; border-radius: 3px; padding: 3px 2px; display: flex; flex-direction: column; align-items: center; }
+.cal-empty { border: none; }
+.cal-dnum { font-family: var(--mono); font-size: 11px; color: var(--ink-dim); }
+.cal-cell.cal-sun .cal-dnum { color: var(--tag-red); }
+.cal-cell.cal-sat .cal-dnum { color: var(--tag-azure); }
+.cal-has { background: rgba(184, 155, 94, 0.12); border-color: var(--gold-dim); }
+.cal-has .cal-dnum { color: var(--ink); }
+.cal-has:hover { background: rgba(184, 155, 94, 0.22); }
+.cal-dot { margin-top: 3px; font-family: var(--mono); font-size: 9px; min-width: 16px; height: 16px; line-height: 16px; text-align: center; background: var(--blood-bright); color: #fff; border-radius: 9px; padding: 0 4px; }
+.cal-today { border-color: var(--gold); }
+.cal-today .cal-dnum { color: var(--gold); font-weight: 700; }
+.cal-sel { outline: 2px solid var(--blood-bright); outline-offset: -1px; background: rgba(184, 40, 40, 0.20); }
+.cal-filter-chip { font-family: var(--mono); font-size: 10px; color: var(--ink-dim); margin-bottom: 10px; display: flex; align-items: center; gap: 8px; letter-spacing: 0.05em; }
+.cal-filter-chip button { background: transparent; border: 1px solid var(--rule); color: var(--ink-faint); font-family: var(--mono); font-size: 9px; padding: 2px 6px; cursor: pointer; }
+@media (max-width: 600px) { .cal-cell { min-height: 34px; } .cal-dnum { font-size: 10px; } .cal-dot { font-size: 8px; height: 14px; line-height: 14px; min-width: 14px; } }
 .nav-sep { align-self: center; width: 1px; height: 16px; background: var(--rule); margin: 0 4px; flex-shrink: 0; pointer-events: none; }
 .tab.active::after { content: ''; position: absolute; bottom: -1px; left: 24px; right: 24px; height: 1px; background: var(--blood-bright); }
 
@@ -626,6 +652,7 @@ body.role-guest .guest-readonly-note { display: block; }
         </div>
         <div class="field"><label>Loop / Notes · 관극 메모</label><textarea id="visitNotes" placeholder="3루프, 5층 시작..."></textarea></div>
         <button class="btn" id="saveVisit">기록 보존하기 · Seal Entry</button>
+        <div id="watchDefaultHint" style="display:none; margin-top:8px; font-family:var(--mono); font-size:10px; letter-spacing:0.04em; color:var(--ink-dim);"></div>
         <div class="guest-readonly-note">열람 전용 모드입니다. 기록·수정하려면 우측 상단에서 로그인하세요.</div>
         <button class="btn ghost" id="clearForm" style="margin-top: 8px;">초기화 · Clear</button>
       </div>
@@ -677,6 +704,7 @@ body.role-guest .guest-readonly-note { display: block; }
         <option value="asc">오래된순</option>
         <option value="count">장면 많은 순</option>
       </select>
+      <select id="historyMonth"><option value="all">전체 기간</option></select>
       <button class="mini-btn" id="addNewPerf" style="padding: 8px 16px;">+ 새 공연 회차</button>
     </div>
 
@@ -723,6 +751,10 @@ body.role-guest .guest-readonly-note { display: block; }
       </div>
     </div>
 
+    <div class="cal-wrap" style="margin-bottom: 8px;">
+      <button class="mini-btn" id="calToggle" style="padding: 6px 14px;">📅 캘린더 보기</button>
+    </div>
+    <div id="visitCalendar" class="visit-cal" style="display:none;"></div>
     <div id="historyList"></div>
   </div>
 
@@ -777,6 +809,7 @@ body.role-guest .guest-readonly-note { display: block; }
         <option value="prob">확률 높은 순</option>
         <option value="name">이름순</option>
       </select>
+      <select id="statsMonth"><option value="all">전체 기간</option></select>
     </div>
 
     <div class="actor-table">
@@ -2096,6 +2129,17 @@ function updateCastingProgress() {
   const filled = state.characters.filter(c => (currentCastingSlots[c.name] || []).some(Boolean)).length;
   prog.textContent = `${filled} / ${state.characters.length}`;
 }
+let sessionWatchDefault = null; // remembered 관극/기록만 choice for this session (null = ask)
+function updateWatchDefaultHint() {
+  const el = $('#watchDefaultHint');
+  if (!el) return;
+  if (!sessionWatchDefault) { el.style.display = 'none'; el.innerHTML = ''; return; }
+  const label = sessionWatchDefault === 'watched' ? '관극함' : '기록만';
+  el.style.display = '';
+  el.innerHTML = `이번 세션 저장 기본값: <strong style="color:var(--gold);">${label}</strong> · 팝업 없이 저장 <button type="button" id="watchDefaultReset" style="background:transparent; border:1px solid var(--rule); color:var(--ink-faint); font-family:var(--mono); font-size:9px; padding:2px 7px; margin-left:4px; cursor:pointer;">해제</button>`;
+  const r = $('#watchDefaultReset');
+  if (r) r.addEventListener('click', () => { sessionWatchDefault = null; updateWatchDefaultHint(); });
+}
 // 관극 확인 팝업: resolves 'watched' | 'unwatched' | 'cancel'
 function askWatched() {
   return new Promise(resolve => {
@@ -2110,14 +2154,20 @@ function askWatched() {
           <button type="button" class="btn" style="width:auto; padding:14px 30px;" data-ans="watched">관극함</button>
           <button type="button" class="btn ghost" style="width:auto; padding:14px 30px;" data-ans="unwatched">기록만</button>
         </div>
+        <label style="display:inline-flex; align-items:center; gap:7px; margin-top:16px; font-size:12px; color:var(--ink-dim); cursor:pointer;"><input type="checkbox" id="watchRemember" style="width:auto; margin:0;"> 이번 세션 동안 이 선택 기억 (다시 안 묻기)</label>
         <div style="margin-top:14px; font-size:12px; color:var(--ink-faint); font-style:italic;">창 바깥 클릭 또는 ESC = 취소</div>
       </div>`;
     document.body.appendChild(back);
     let done = false;
     function finish(val) {
       if (done) return; done = true;
+      if (val !== 'cancel') {
+        const rem = back.querySelector('#watchRemember');
+        if (rem && rem.checked) sessionWatchDefault = val;
+      }
       document.removeEventListener('keydown', onKey);
       back.remove();
+      updateWatchDefaultHint();
       resolve(val);
     }
     function onKey(e) { if (e.key === 'Escape') finish('cancel'); }
@@ -2321,7 +2371,7 @@ $('#saveVisit').addEventListener('click', async () => {
   if (selectedScenes.length === 0 && Object.keys(currentCasting).length === 0) {
     showToast('장면 또는 캐스팅을 입력하세요'); return;
   }
-  const watchAns = await askWatched();
+  const watchAns = sessionWatchDefault || await askWatched();
   if (watchAns === 'cancel') return;
   const watched = (watchAns === 'watched');
   const visitChoice = $('#visitSelector').value;
@@ -2478,6 +2528,9 @@ let editSlotExtras = {}; // {vid: {charName: extraSlotCount}}
 let visitMetaEditMode = null; // for editing date/notes/matinee of a visit
 let historyPage = 0; // pagination page (0-based)
 const HISTORY_PAGE_SIZE = 50;
+let calMonth = null;        // {y, m(0-based)} currently viewed month, null=auto
+let calFilterDate = null;   // 'YYYY-MM-DD' active day filter, or null
+let historyMonthFilter = 'all'; // 'YYYY-MM' month filter for history, or 'all'
 
 // Pair search: parse a query like "Fate Witch = Haley Sung, Matron = Gabriel" into [{role, actor}, ...]
 // Returns null if the query contains no '=' (so the caller falls back to normal OR search).
@@ -2767,7 +2820,100 @@ function wireManderleyCardEvents() {
 }
 
 
+function monthsWithData() {
+  const set = new Set();
+  state.visits.forEach(v => { if (!v.isLegacy && v.date && v.date.length >= 7) set.add(v.date.slice(0, 7)); });
+  return [...set].sort().reverse();
+}
+function fillMonthSelect(el, cur) {
+  if (!el) return;
+  const months = monthsWithData();
+  el.innerHTML = '<option value="all">전체 기간</option>' + months.map(m => {
+    const p = m.split('-');
+    return `<option value="${m}">${p[0]}년 ${parseInt(p[1], 10)}월</option>`;
+  }).join('');
+  el.value = (cur === 'all' || months.includes(cur)) ? cur : 'all';
+}
+function inStatsMonth(v) { return statsMonth === 'all' || (v.date || '').startsWith(statsMonth); }
+
+function renderVisitCalendar() {
+  const wrap = $('#visitCalendar');
+  if (!wrap) return;
+  const pad = n => String(n).padStart(2, '0');
+  // counts per date, respecting the watched/all scope toggle
+  const counts = {};
+  state.visits.forEach(v => {
+    if (v.isLegacy || !v.date) return;
+    if (historyScope === 'watched' && !v.isWatched) return;
+    counts[v.date] = (counts[v.date] || 0) + 1;
+  });
+  if (!calMonth) {
+    const dates = Object.keys(counts).sort();
+    const base = dates.length ? dates[dates.length - 1] : null;
+    const d = base ? new Date(base + 'T00:00:00') : new Date();
+    calMonth = { y: d.getFullYear(), m: d.getMonth() };
+  }
+  const { y, m } = calMonth;
+  const startDow = new Date(y, m, 1).getDay();
+  const daysInMonth = new Date(y, m + 1, 0).getDate();
+  const now = new Date();
+  const todayStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  const monthPrefix = `${y}-${pad(m + 1)}`;
+  const monthCount = Object.entries(counts).filter(([d]) => d.startsWith(monthPrefix)).reduce((s, [, c]) => s + c, 0);
+
+  let cells = '';
+  for (let i = 0; i < startDow; i++) cells += '<div class="cal-cell cal-empty"></div>';
+  for (let day = 1; day <= daysInMonth; day++) {
+    const ds = `${monthPrefix}-${pad(day)}`;
+    const c = counts[ds] || 0;
+    const dow = (startDow + day - 1) % 7;
+    const cls = ['cal-cell'];
+    if (c > 0) cls.push('cal-has');
+    if (ds === todayStr) cls.push('cal-today');
+    if (ds === calFilterDate) cls.push('cal-sel');
+    if (dow === 0) cls.push('cal-sun');
+    if (dow === 6) cls.push('cal-sat');
+    cells += `<div class="${cls.join(' ')}" data-cal-day="${ds}"${c > 0 ? ' style="cursor:pointer;"' : ''}>`
+      + `<span class="cal-dnum">${day}</span>${c > 0 ? `<span class="cal-dot">${c}</span>` : ''}</div>`;
+  }
+  const wd = ['일', '월', '화', '수', '목', '금', '토'];
+  wrap.innerHTML = `
+    <div class="cal-head">
+      <button class="mini-btn cal-nav" data-cal-nav="-1">◀</button>
+      <div class="cal-title">${y}년 ${m + 1}월 <span class="cal-mcount">· 관극 ${monthCount}</span></div>
+      <button class="mini-btn cal-nav" data-cal-nav="1">▶</button>
+      <button class="mini-btn cal-nav" data-cal-nav="today">오늘</button>
+    </div>
+    ${calFilterDate ? `<div class="cal-filter-chip">이 날짜만 보는 중: <strong>${calFilterDate}</strong><button data-cal-clear="1">✕ 해제</button></div>` : ''}
+    <div class="cal-grid cal-weekdays">${wd.map((w, i) => `<div class="cal-wd${i === 0 ? ' cal-sun' : ''}${i === 6 ? ' cal-sat' : ''}">${w}</div>`).join('')}</div>
+    <div class="cal-grid">${cells}</div>`;
+
+  wrap.querySelectorAll('[data-cal-nav]').forEach(b => b.addEventListener('click', () => {
+    const val = b.dataset.calNav;
+    if (val === 'today') { const d = new Date(); calMonth = { y: d.getFullYear(), m: d.getMonth() }; }
+    else {
+      let nm = m + parseInt(val, 10), ny = y;
+      if (nm < 0) { nm = 11; ny--; }
+      if (nm > 11) { nm = 0; ny++; }
+      calMonth = { y: ny, m: nm };
+    }
+    renderVisitCalendar();
+  }));
+  wrap.querySelectorAll('[data-cal-day]').forEach(cell => cell.addEventListener('click', () => {
+    const ds = cell.dataset.calDay;
+    if (!counts[ds]) return;
+    calFilterDate = (calFilterDate === ds) ? null : ds;
+    if (calFilterDate) historyMonthFilter = 'all';
+    historyPage = 0;
+    renderHistory();
+  }));
+  const clr = wrap.querySelector('[data-cal-clear]');
+  if (clr) clr.addEventListener('click', () => { calFilterDate = null; historyPage = 0; renderHistory(); });
+}
+
 function renderHistory() {
+  renderVisitCalendar();
+  fillMonthSelect($('#historyMonth'), historyMonthFilter);
   const term = $('#historySearch').value.toLowerCase().trim();
   const sort = $('#historySort').value;
   // The Manderley Experience is a flag on a regular performance, not a separate visit,
@@ -2778,6 +2924,10 @@ function renderHistory() {
   if (historyScope === 'watched') {
     visits = visits.filter(v => v.isWatched || v.isLegacy);
   }
+
+  // Calendar day filter (click a day in the calendar to filter to that date)
+  if (calFilterDate) visits = visits.filter(v => v.date === calFilterDate);
+  else if (historyMonthFilter !== 'all') visits = visits.filter(v => (v.date || '').startsWith(historyMonthFilter));
 
   // #N = chronological performance order (used by number search + card badges)
   const numMap = getVisitNumMap();
@@ -2810,7 +2960,7 @@ function renderHistory() {
 
   const list = $('#historyList');
   if (visits.length === 0) {
-    const hasFilter = $('#historySearch').value || historyScope !== 'watched';
+    const hasFilter = $('#historySearch').value || historyScope !== 'watched' || calFilterDate || historyMonthFilter !== 'all';
     if (hasFilter) {
       list.innerHTML = `
         <div style="color: var(--ink-faint); padding: 40px; font-style: italic; text-align: center;">
@@ -2833,6 +2983,8 @@ function renderHistory() {
     const cb = document.getElementById('clearHistoryFilters');
     if (cb) cb.addEventListener('click', () => {
       $('#historySearch').value = '';
+      calFilterDate = null;
+      historyMonthFilter = 'all';
       historyScope = 'watched';
       historyPage = 0;
       document.querySelectorAll('#historyScopeToggle button').forEach(b => b.classList.toggle('active', b.dataset.scope === 'watched'));
@@ -3571,6 +3723,26 @@ $('#confirmNewPerf').addEventListener('click', () => {
 
 $('#historySearch').addEventListener('input', () => { historyPage = 0; renderHistory(); });
 $('#historySort').addEventListener('change', () => { historyPage = 0; renderHistory(); });
+$('#historyMonth') && $('#historyMonth').addEventListener('change', () => {
+  historyMonthFilter = $('#historyMonth').value;
+  calFilterDate = null;
+  historyPage = 0;
+  renderHistory();
+});
+$('#calToggle') && $('#calToggle').addEventListener('click', () => {
+  const el = $('#visitCalendar');
+  const open = el.style.display === 'none';
+  el.style.display = open ? '' : 'none';
+  try { localStorage.setItem('snm_cal_open', open ? '1' : '0'); } catch (e) {}
+  $('#calToggle').textContent = open ? '📅 캘린더 접기' : '📅 캘린더 보기';
+  if (open) renderVisitCalendar();
+});
+try {
+  if (localStorage.getItem('snm_cal_open') === '1') {
+    const el = $('#visitCalendar');
+    if (el) { el.style.display = ''; const bt = $('#calToggle'); if (bt) bt.textContent = '📅 캘린더 접기'; }
+  }
+} catch (e) {}
 
 // ---- The Manderley Experience handlers ----
 $('#mandSearch') && $('#mandSearch').addEventListener('input', () => renderManderley());
@@ -3615,6 +3787,7 @@ function getPerformerStats(scope = 'performances') {
   const stats = {};
   const visits = state.visits.filter(v => {
     if (v.isLegacy) return false;
+    if (!inStatsMonth(v)) return false;
     if (scope === 'watched') return v.isWatched;
     return true;
   });
@@ -3640,6 +3813,7 @@ function getActorStats(filterType = 'all', scope = 'watched') {
   // matches the same population as the numerator (fixes Manderley/legacy mismatch).
   const countedVisits = state.visits.filter(v => {
     if (v.isLegacy) return false;
+    if (!inStatsMonth(v)) return false;
     if (scope === 'watched') return !!v.isWatched;
     return true;
   });
@@ -3657,9 +3831,11 @@ function getActorStats(filterType = 'all', scope = 'watched') {
 }
 
 let statsScope = 'watched'; // 'watched' or 'performances'
+let statsMonth = 'all';     // 'YYYY-MM' period filter for stats, or 'all'
 let statsView = 'performer'; // 'performer' or 'encounter'
 
 function renderStats() {
+  fillMonthSelect($('#statsMonth'), statsMonth);
   if (statsView === 'performer') {
     renderPerformerStats();
   } else {
@@ -3670,7 +3846,9 @@ function renderStats() {
 function renderPerformerStats() {
   const sort = $('#statsSort').value;
   const stats = getPerformerStats(statsScope);
-  const totalPerf = statsScope === 'watched' ? getWatchedCount() : getPerformanceCount();
+  const totalPerf = statsMonth === 'all'
+    ? (statsScope === 'watched' ? getWatchedCount() : getPerformanceCount())
+    : state.visits.filter(v => !v.isLegacy && inStatsMonth(v) && (statsScope !== 'watched' || v.isWatched)).length;
 
   // Top stats: total perfs, unique performers, top performer
   const performerCount = Object.keys(stats).length;
@@ -3826,6 +4004,7 @@ function cycleActorTag(actor) {
 
 $('#statsType').addEventListener('change', renderStats);
 $('#statsSort').addEventListener('change', renderStats);
+$('#statsMonth') && $('#statsMonth').addEventListener('change', () => { statsMonth = $('#statsMonth').value; renderStats(); });
 $('#statsSearch') && $('#statsSearch').addEventListener('input', renderStats);
 
 // Stats scope toggle (watched vs performances)
@@ -6234,19 +6413,42 @@ function bwEncoderHtml(v) {
   const section = (t) => {
     const items = byType[t] || [];
     if (!items.length) return '';
-    return `<div style="margin-top:8px;"><div style="font-family:var(--mono); font-size:9px; letter-spacing:0.2em; color:var(--gold); text-transform:uppercase; margin-bottom:4px;">${t}</div>
+    return `<div class="bw-section" style="margin-top:8px;"><div style="font-family:var(--mono); font-size:9px; letter-spacing:0.2em; color:var(--gold); text-transform:uppercase; margin-bottom:4px;">${t}</div>
       <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(200px,1fr)); gap:4px;">
       ${items.map(s => {
         const actor = autoActorForScene(s, v);
         const checked = has(s.id);
-        return `<label style="display:flex; align-items:center; gap:6px; font-size:12px; cursor:pointer; padding:2px 0;">
+        return `<label class="bw-item" data-role="${escapeHtml((s.role || '').toLowerCase())}" data-actor="${escapeHtml((actor || '').toLowerCase())}" data-hascast="${actor ? '1' : '0'}" style="display:flex; align-items:center; gap:6px; font-size:12px; cursor:pointer; padding:2px 0;">
           <input type="checkbox" data-bw-enc="${escapeHtml(v.id)}" data-scene="${escapeHtml(s.id)}" ${checked ? 'checked' : ''}>
           <span style="color:var(--ink);">${escapeHtml(s.role)}</span>${actor ? `<span style="color:var(--gold); font-family:var(--mono); font-size:10px;">${escapeHtml(actor)}</span>` : ''}
         </label>`;
       }).join('')}
       </div></div>`;
   };
-  return section('1:1') + section('인터랙션') + section('워크아웃');
+  return `<div class="bw-enc" data-bw-encwrap="${escapeHtml(v.id)}">
+    <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:8px 0 2px;">
+      <input type="text" class="bw-enc-search" placeholder="장면·배우 검색" style="flex:1; min-width:140px; padding:5px 8px; font-size:12px;">
+      <label style="display:flex; align-items:center; gap:6px; font-size:11px; color:var(--ink-dim); cursor:pointer; white-space:nowrap;"><input type="checkbox" class="bw-enc-castonly" style="width:auto;"> 캐스팅 있는 장면만</label>
+    </div>
+    ${section('1:1') + section('인터랙션') + section('워크아웃')}
+  </div>`;
+}
+
+function bwApplyEncFilter(wrap) {
+  if (!wrap) return;
+  const q = (wrap.querySelector('.bw-enc-search')?.value || '').toLowerCase().trim();
+  const castOnly = !!wrap.querySelector('.bw-enc-castonly')?.checked;
+  wrap.querySelectorAll('.bw-item').forEach(it => {
+    const role = it.dataset.role || '', actor = it.dataset.actor || '';
+    let show = true;
+    if (q && !(role.includes(q) || actor.includes(q))) show = false;
+    if (castOnly && it.dataset.hascast !== '1') show = false;
+    it.style.display = show ? '' : 'none';
+  });
+  wrap.querySelectorAll('.bw-section').forEach(sec => {
+    const anyVisible = [...sec.querySelectorAll('.bw-item')].some(it => it.style.display !== 'none');
+    sec.style.display = anyVisible ? '' : 'none';
+  });
 }
 
 function wireBwList() {
@@ -6280,6 +6482,12 @@ function wireBwList() {
       v.entries = (v.entries || []).filter(e => e.sceneId !== scene.id);
     }
     bwSyncVisit(v); saveState(); renderHeader();
+  }));
+  $$('.bw-enc-search').forEach(inp => inp.addEventListener('input', () => {
+    bwApplyEncFilter(inp.closest('[data-bw-encwrap]'));
+  }));
+  $$('.bw-enc-castonly').forEach(cb => cb.addEventListener('change', () => {
+    bwApplyEncFilter(cb.closest('[data-bw-encwrap]'));
   }));
   $$('[data-bw-month]').forEach(b => b.addEventListener('click', () => {
     if (guardGuest()) return;
