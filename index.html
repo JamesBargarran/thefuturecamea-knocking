@@ -796,7 +796,7 @@ body.role-guest .guest-readonly-note { display: block; }
       </select>
       <select id="roleCompletion" title="컴플리션 필터">
         <option value="all">전체 보기</option>
-        <option value="unseen">미획득 장면(0회)</option>
+        <option value="unseen">미경험 장면(0회)</option>
         <option value="incomplete">미완성(배우 남음)</option>
       </select>
     </div>
@@ -1835,14 +1835,23 @@ function inferSceneCharacters(scene) {
 }
 
 function getSceneActorPool(scene) {
-  // Union of scene.actors + actors from each inferred character's pool
+  // Union of scene.actors + actors from every identified character's pool:
+  //   keyword-inferred (매트론→Matron Lang), linkedChar, and walkout scenes whose role IS a character name.
   const set = new Set();
   (scene.actors || []).forEach(a => splitActorString(a).forEach(p => set.add(p)));
-  inferSceneCharacters(scene).forEach(charName => {
+  const chars = [...inferSceneCharacters(scene)];
+  if (scene.linkedChar && !chars.includes(scene.linkedChar)) chars.push(scene.linkedChar);
+  if (getCharacterByName(scene.role) && !chars.includes(scene.role)) chars.push(scene.role);
+  chars.forEach(charName => {
     const c = getCharacterByName(charName);
     if (c) c.actors.forEach(a => set.add(a));
   });
-  return sortActorList([...set]);
+  // 1회성(one-timer) performers are garbage — exclude from the casting pool
+  return sortActorList([...set].filter(a => !ONE_TIMERS.has(a)));
+}
+// Actual casting pool for display: character pool for normal scenes, combos for composed/freeCombo.
+function scenePool(scene) {
+  return (isComposedScene(scene) || isFreeComboScene(scene)) ? getSceneActors(scene) : getSceneActorPool(scene);
 }
 
 function addSelectedScene(sceneId) {
@@ -3814,7 +3823,7 @@ function renderRoles() {
   const sceneActorCounts = getSceneActorCounts();
   const seenOf = (s) => !!sceneActorCounts[s.id];   // scene experienced at all
   const perfStats = (s) => {   // 배역×퍼포머: pool actors experienced / pool size
-    const pool = getSceneActors(s);
+    const pool = scenePool(s);
     const counts = sceneActorCounts[s.id] || {};
     return { seen: pool.filter(a => (counts[a] || 0) > 0).length, total: pool.length };
   };
@@ -3848,7 +3857,7 @@ function renderRoles() {
       <div style="background:var(--paper-raised); border:1px solid var(--rule); padding:14px 16px; margin-bottom:16px;">
         ${barRow('배역 기준 · 장면 경험', sc, scAll)}
         <div style="height:1px; background:var(--rule); margin:12px 0;"></div>
-        ${barRow('배우 기준 · 배역×퍼포머', pf, pfAll)}
+        ${barRow('배우 기준 · 퍼포머 경험', pf, pfAll)}
       </div>`;
   }
 
@@ -3858,19 +3867,19 @@ function renderRoles() {
     if (compFilter === 'incomplete') { const ps = perfStats(s); if (ps.total > 0 && ps.seen >= ps.total) return false; }
     if (!term) return true;
     if (s.role.toLowerCase().includes(term)) return true;
-    if (getSceneActors(s).some(a => a.toLowerCase().includes(term))) return true;
+    if (scenePool(s).some(a => a.toLowerCase().includes(term))) return true;
     return false;
   });
 
   $('#rolesList').innerHTML = scenes.map(s => {
     const counts = sceneActorCounts[s.id] || {};
-    const actors = getSceneActors(s);
+    const actors = scenePool(s);
     const unseen = !seenOf(s);
     const ps = perfStats(s);
     const perfLabel = ps.total ? ` <span style="font-family:var(--mono); font-size:10px; color:${ps.seen >= ps.total ? 'var(--gold)' : 'var(--ink-dim)'};">· 배우 ${ps.seen}/${ps.total}</span>` : '';
     return `
       <div class="role-summary" data-scene="${s.id}">
-        <div class="role-name">${escapeHtml(s.role)}${unseen ? ' <span style="font-family:var(--mono); font-size:9px; color:var(--blood-bright); letter-spacing:0.15em;">미획득</span>' : ''}</div>
+        <div class="role-name">${escapeHtml(s.role)}${unseen ? ' <span style="font-family:var(--mono); font-size:9px; color:var(--blood-bright); letter-spacing:0.15em;">미경험</span>' : ''}</div>
         <div class="role-type">${s.type}${s.linkedChar ? ` · ${escapeHtml(s.linkedChar)}` : ''}${s.userAdded ? ' · 사용자' : ''}${perfLabel}</div>
         <div class="role-actors">
           ${actors.map(a => {
@@ -3901,6 +3910,7 @@ function renderInteractions() {
 
   // Collect all entries from watched visits
   // Structure: sceneId -> { scene, occurrences: [{date, matinee, perfNum, actor, isLegacy}] }
+  const numMap = getVisitNumMap();
   const sceneMap = {};
   state.visits.forEach(v => {
     if (!v.isWatched) return;
@@ -3910,7 +3920,7 @@ function renderInteractions() {
       sceneMap[e.sceneId].occurrences.push({
         date: v.date || '',
         matinee: v.matinee || '',
-        perfNum: v.perfNum || null,
+        num: (numMap[v.id] != null ? numMap[v.id] : null),
         actor: e.actor || '',
         isLegacy: !!v.isLegacy
       });
@@ -3968,7 +3978,7 @@ function renderInteractions() {
               <div class="ix-entries">
                 ${sorted.map(o => {
                   const dateStr = o.date ? `${o.date}${o.matinee ? ' ' + o.matinee : ''}` : '(날짜 미상)';
-                  const perfStr = o.perfNum ? `#${o.perfNum} · ` : '';
+                  const perfStr = o.num ? `#${o.num} · ` : '';
                   const tag = o.actor ? getActorTag(o.actor) : null;
                   const dot = tag ? `<span class="chip-dot" style="background:${COLOR_VARS[tag]};display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:3px;vertical-align:middle;"></span>` : '';
                   const legacyMark = o.isLegacy ? '<span class="ix-legacy">legacy</span>' : '';
@@ -5143,7 +5153,7 @@ function openRoleModal(sceneId) {
   encounters.forEach(e => { if (e.actor) byActor[e.actor] = (byActor[e.actor] || 0) + 1; });
 
   // Pool actors first, then any actors seen in history but no longer in the pool
-  const poolActors = getSceneActors(scene);
+  const poolActors = scenePool(scene);
   const poolSet = new Set(poolActors);
   const extraActors = Object.keys(byActor).filter(a => a && !poolSet.has(a))
     .sort((a, b) => byActor[b] - byActor[a]);
@@ -5171,7 +5181,7 @@ function openRoleModal(sceneId) {
     </div>
   `;
   $('#modalTitle').textContent = scene.role;
-  $('#modalSub').textContent = `${scene.type}${scene.linkedChar ? ' · ' + scene.linkedChar : ''} · ${getSceneActors(scene).length} cast members`;
+  $('#modalSub').textContent = `${scene.type}${scene.linkedChar ? ' · ' + scene.linkedChar : ''} · ${scenePool(scene).length} cast members`;
   $('#modalContent').innerHTML = content;
   $('#modal').classList.add('open');
 }
