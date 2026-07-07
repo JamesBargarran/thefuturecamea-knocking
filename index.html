@@ -4761,7 +4761,8 @@ function renderScenePool() {
     const addMode = sceneAddMode[s.id] || 'manual';
     const candidates = allActors.filter(a => !s.actors.includes(a));
     const composed = isComposedScene(s);
-    const composedRow = composed ? `
+    const composing = Array.isArray(s.composedOf);
+    const composedRow = composing ? `
       <div style="background: rgba(139, 26, 26, 0.06); border: 1px solid var(--blood); padding: 8px 10px; margin: 8px 0; font-size: 12px;">
         <div style="font-family: var(--mono); font-size: 9px; letter-spacing: 0.2em; color: var(--blood-bright); text-transform: uppercase; margin-bottom: 4px;">조합 장면 · ${s.composedOf.length}개 캐릭터</div>
         <div style="display: flex; flex-wrap: wrap; gap: 4px; align-items: center;">
@@ -4789,7 +4790,7 @@ function renderScenePool() {
           <div class="sp-type">${s.type}${composed ? ' · 조합' : ''}${s.userAdded ? '<span class="user-added-tag">USER</span>' : ''}</div>
         </div>
         ${composedRow}
-        ${!composed ? `
+        ${!composing ? `
           <div class="sp-actors">
             ${s.actors.map(a => `
               <span class="sp-actor-chip">${escapeHtml(a)}<span class="x" data-remove-actor="${escapeHtml(a)}" title="제거">×</span></span>
