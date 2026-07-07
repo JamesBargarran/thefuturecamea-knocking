@@ -101,6 +101,11 @@ h2.section-title { font-family: var(--serif-display); font-size: 36px; font-weig
 .field input, .field textarea, .field select { width: 100%; background: var(--paper-deep); border: 1px solid var(--rule); color: var(--ink); font-family: var(--serif-body); font-size: 14px; padding: 10px 12px; transition: border-color 0.2s; }
 .field input:focus, .field textarea:focus, .field select:focus { outline: none; border-color: var(--gold); }
 .field textarea { resize: vertical; min-height: 80px; font-family: var(--serif-body); }
+.np-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 16px; }
+.np-grid .field { min-width: 0; }
+.np-grid input, .np-grid select { min-width: 0; max-width: 100%; box-sizing: border-box; }
+.np-grid input[type="date"] { -webkit-appearance: none; appearance: none; }
+@media (max-width: 600px) { .np-grid { grid-template-columns: 1fr; } }
 
 .btn { width: 100%; padding: 14px; background: var(--blood); color: var(--ink); border: 1px solid var(--blood-bright); font-family: var(--mono); font-size: 11px; letter-spacing: 0.28em; text-transform: uppercase; cursor: pointer; transition: all 0.2s; font-weight: 500; }
 .btn:hover { background: var(--blood-bright); letter-spacing: 0.32em; }
@@ -710,7 +715,7 @@ body.role-guest .guest-readonly-note { display: block; }
 
     <div id="newPerfForm" style="display: none; background: var(--paper-raised); border: 1px solid var(--gold-dim); padding: 20px; margin-bottom: 20px;">
       <h4 style="font-family: var(--serif-display); font-size: 18px; font-style: italic; margin-bottom: 12px;">새 공연 회차 추가</h4>
-      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 16px;">
+      <div class="np-grid">
         <div class="field" style="margin: 0;">
           <label>날짜</label>
           <input type="date" id="newPerfDate">
