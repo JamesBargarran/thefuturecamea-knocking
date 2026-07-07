@@ -264,6 +264,7 @@ body.role-guest #saveVisit,
 body.role-guest .team-bulk-bar,
 body.role-guest .excel-section,
 body.role-guest [data-auth-only] { display: none !important; }
+body:not(.role-admin) .admin-only { display: none !important; }
 body.role-guest .guest-readonly-note { display: block; }
 .guest-readonly-note { display: none; margin: 12px 0; padding: 10px 14px; border: 1px dashed var(--rule); color: var(--ink-faint); font-family: var(--mono); font-size: 11px; letter-spacing: 0.05em; }
 .team-blue { background: rgba(90, 140, 200, 0.18); color: #7eb0e0; border: 1px solid #5a8cc8; padding: 1px 6px; border-radius: 2px; font-family: var(--mono); font-size: 8px; letter-spacing: 0.15em; text-transform: uppercase; }
@@ -352,6 +353,9 @@ body.role-guest .guest-readonly-note { display: block; }
 .scene-pool-card .sp-delete { background: transparent; border: 1px solid var(--rule); color: var(--ink-faint); font-family: var(--mono); font-size: 10px; letter-spacing: 0.15em; text-transform: uppercase; padding: 4px 10px; cursor: pointer; margin-top: 8px; }
 .scene-pool-card .sp-delete:hover { color: var(--blood-bright); border-color: var(--blood-bright); }
 .user-added-tag { font-family: var(--mono); font-size: 8px; color: var(--gold); margin-left: 4px; letter-spacing: 0.15em; }
+.share-badge { font-family: var(--mono); font-size: 8px; letter-spacing: 0.12em; padding: 1px 5px; margin-left: 6px; border-radius: 2px; vertical-align: middle; white-space: nowrap; }
+.share-badge.shared { color: var(--gold); border: 1px solid var(--gold-dim); }
+.share-badge.personal { color: var(--ink-faint); border: 1px solid var(--rule); }
 
 /* EXCEL IMPORT */
 .excel-section { background: var(--paper-raised); border: 1px solid var(--rule); padding: 24px; margin-bottom: 24px; }
@@ -1073,6 +1077,7 @@ body.role-guest .guest-readonly-note { display: block; }
       </div>
       <div class="excel-actions" style="margin-top: 12px;">
         <button id="exportSeedOnly" class="primary">시드 데이터 내보내기 (배포용)</button>
+        <button id="promoteToShared" class="mini-btn admin-only" style="margin-left:8px;">내 개인 회차 → 공유 공연 승격</button>
       </div>
     </div>
 
@@ -2435,11 +2440,15 @@ $('#saveVisit').addEventListener('click', async () => {
       }
     }
     if (!appended) {
-      // Create a fresh user visit
+      // New visit. Regular user -> personal visit. Admin -> SHARED performance
+      // (date/matinee/casting broadcast to everyone) with their own encounters/watched
+      // kept PERSONAL via user_visit_state (admin is just another user for that layer).
       snapshotForUndo('신규 회차 기록');
       const now = Date.now();
+      const matSuffix = matinee === '마티네' ? '_m' : (matinee === '이브닝' ? '_e' : '_x');
+      const newId = currentUserIsAdmin ? ('perf_' + effDate + matSuffix + '_admin_' + now) : ('v' + now);
       const visit = {
-        id: 'v' + now,
+        id: newId,
         date: effDate,
         matinee: normalizeMatinee(matinee),
         notes,
@@ -2447,13 +2456,18 @@ $('#saveVisit').addEventListener('click', async () => {
         casting: { ...currentCasting },
         isLegacy: false,
         isWatched: watched,
-        userAdded: true,
-        source: 'user_visit',
+        userAdded: !currentUserIsAdmin,
+        source: currentUserIsAdmin ? 'seed_perf' : 'user_visit',
         createdAt: now,
         updatedAt: now
       };
       state.visits.push(visit);
-      queueAddedVisitPush(visit.id);
+      if (currentUserIsAdmin) {
+        queuePerformancePush(visit.id);   // shared: date/matinee/casting/notes
+        queueVisitStatePush(visit.id);    // personal: my encounters + watched
+      } else {
+        queueAddedVisitPush(visit.id);
+      }
       showToast(watched ? '신규 회차로 관극 기록됨' : '신규 회차로 기록만 저장됨');
     }
   } else {
@@ -3208,7 +3222,7 @@ function renderHistory() {
           <div class="visit-header-left">
             <span class="visit-num">${numLabel}</span>
             <div>
-              <div class="visit-date">${escapeHtml(dateLabel)}${watchedBadge}${manderleyBadge}</div>
+              <div class="visit-date">${escapeHtml(dateLabel)}${watchedBadge}${manderleyBadge}${shareBadgeHtml(v)}</div>
               <div class="visit-meta">${v.entries.length} encounters${castingEntries.length ? ' · ' + castingEntries.length + ' cast' : ''}${v.isLegacy ? ' · ' + (v.legacyViewCount || 0) + ' visits' : ''}</div>
             </div>
           </div>
@@ -3723,6 +3737,7 @@ $('#confirmNewPerf').addEventListener('click', () => {
   saveState();
   if (isAdminAdding) {
     queuePerformancePush(id);
+    queueVisitStatePush(id);
   } else {
     queueAddedVisitPush(id);
   }
@@ -5932,6 +5947,37 @@ function exportSeedOnly() {
 }
 $('#exportSeedOnly') && $('#exportSeedOnly').addEventListener('click', exportSeedOnly);
 
+// Admin only: promote personal (user-added) visits to SHARED performances.
+// date/matinee/casting -> everyone; my encounters/watched stay personal (user_visit_state).
+function promotePersonalToShared() {
+  if (guardGuest()) return;
+  if (!currentUserIsAdmin) { showToast('관리자만 가능합니다'); return; }
+  const targets = state.visits.filter(v => !v.isLegacy && v.userAdded && v.id && !v.id.startsWith('perf_') && v.date);
+  if (!targets.length) { showToast('승격할 개인 회차가 없습니다'); return; }
+  if (!confirm(`${targets.length}개의 개인 회차를 공유 공연으로 승격할까요?\n\n· 날짜 / 회차 / 캐스팅 → 모두에게 공유\n· 내 인카운터 / 관극 표시 → 내 개인 기록으로 유지\n\n(되돌리려면 상단 UNDO)`)) return;
+  snapshotForUndo('개인 회차 → 공유 공연 승격');
+  const now = Date.now();
+  let n = 0;
+  targets.forEach((v, i) => {
+    const oldId = v.id;
+    const m = normalizeMatinee(v.matinee);
+    const matSuffix = m === '마티네' ? '_m' : (m === '이브닝' ? '_e' : '_x');
+    v.id = 'perf_' + (v.date || 'nd') + matSuffix + '_admin_' + now + '_' + i;
+    v.userAdded = false;
+    v.source = 'seed_perf';
+    v.updatedAt = now;
+    queueAddedVisitPush(oldId);     // old personal row no longer has a visit -> deleted on flush
+    queuePerformancePush(v.id);     // shared: date/matinee/casting/notes
+    queueVisitStatePush(v.id);      // personal: my encounters/watched
+    n++;
+  });
+  saveState();
+  renderHistory();
+  renderHeader();
+  showToast(`${n}개 회차를 공유 공연으로 승격했습니다`);
+}
+$('#promoteToShared') && $('#promoteToShared').addEventListener('click', promotePersonalToShared);
+
 $('#exportCSV').addEventListener('click', () => {
   const rows = [['visit_id', 'date', 'visit_num', 'type', 'role', 'actor', 'sub_name', 'status', 'notes', 'is_legacy']];
   const numMap = getVisitNumMap();
@@ -6407,6 +6453,13 @@ function renderBwList() {
   wireBwList();
 }
 
+function shareBadgeHtml(v) {
+  if (!v || v.isLegacy) return '';
+  const shared = v.id && v.id.startsWith('perf_') && !v.userAdded;
+  return shared
+    ? '<span class="share-badge shared" title="공유 공연 · 모든 사용자에게 보임">공유</span>'
+    : '<span class="share-badge personal" title="개인 회차 · 나만 보임">개인</span>';
+}
 function bwRowHtml(v, numMap) {
   const encCount = (v.entries || []).length;
   const isOpen = bwExpanded.has(v.id);
@@ -6418,6 +6471,7 @@ function bwRowHtml(v, numMap) {
           <span style="font-family:var(--serif-display); font-style:italic; font-size:18px; color:var(--gold);">#${numMap[v.id]}</span>
           <span style="font-family:var(--mono); font-size:12px; color:var(--ink-dim);">${escapeHtml(v.date || '날짜없음')}${v.matinee ? ' · ' + escapeHtml(v.matinee) : ''}</span>
           ${v.isWatched ? '<span style="font-family:var(--mono); font-size:9px; color:var(--blood-bright); letter-spacing:0.2em;">관극</span>' : ''}
+          ${shareBadgeHtml(v)}
         </label>
         <button class="mini-btn" data-bw-expand="${escapeHtml(v.id)}" style="padding:5px 10px;">인카운터 ${encCount ? '(' + encCount + ') ' : ''}${isOpen ? '▴' : '▾'}</button>
       </div>
