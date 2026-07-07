@@ -710,7 +710,7 @@ body.role-guest .guest-readonly-note { display: block; }
 
     <div id="newPerfForm" style="display: none; background: var(--paper-raised); border: 1px solid var(--gold-dim); padding: 20px; margin-bottom: 20px;">
       <h4 style="font-family: var(--serif-display); font-size: 18px; font-style: italic; margin-bottom: 12px;">새 공연 회차 추가</h4>
-      <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-bottom: 16px;">
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 16px;">
         <div class="field" style="margin: 0;">
           <label>날짜</label>
           <input type="date" id="newPerfDate">
@@ -2454,7 +2454,7 @@ $('#saveVisit').addEventListener('click', async () => {
     // Append entries to an existing visit (and mark as watched)
     const v = state.visits.find(x => x.id === visitChoice);
     if (!v) { showToast('회차를 찾을 수 없습니다'); return; }
-    snapshotForUndo(`#${v.perfNum || ''} 회차 인카운터 기록`);
+    snapshotForUndo(`#${getVisitNumMap()[v.id] || ''} 회차 인카운터 기록`);
     // selectedScenes already holds the full set (existing entries were loaded in on
     // selection), so REPLACE rather than append — this prevents duplicate encounters.
     v.entries = entries;
@@ -2489,7 +2489,7 @@ $('#saveVisit').addEventListener('click', async () => {
     } else {
       queueVisitStatePush(v.id);
     }
-    showToast(`#${v.perfNum || ''} 회차에 인카운터 ${entries.length}개 기록됨`);
+    showToast(`#${getVisitNumMap()[v.id] || ''} 회차에 인카운터 ${entries.length}개 기록됨`);
   }
 
   saveState();
@@ -3718,7 +3718,7 @@ $('#confirmNewPerf').addEventListener('click', () => {
   renderHistory();
   renderHeader();
   populateVisitSelector();
-  showToast(`#${newPerfNum} 추가됨`);
+  showToast(`#${getVisitNumMap()[id] || ''} 추가됨`);
 });
 
 $('#historySearch').addEventListener('input', () => { historyPage = 0; renderHistory(); });
@@ -5525,7 +5525,9 @@ function matchImportVisit(date, matinee, perfNum) {
     const byDateMat = state.visits.find(v => !v.isLegacy && v.date === date && normalizeMatinee(v.matinee) === norm);
     if (byDateMat) return byDateMat;
   }
-  if (date) {
+  if (date && !norm) {
+    // Only fall back to date-only match when NO session (마티네/이브닝) was specified.
+    // A same-day different session (e.g. 토요일 낮공↔밤공) is a legitimately separate show.
     const sameDate = state.visits.filter(v => !v.isLegacy && v.date === date);
     if (sameDate.length === 1) return sameDate[0];
     // ambiguous (2+ same-date visits) without matinee/num → don't guess, treat as unmatched
