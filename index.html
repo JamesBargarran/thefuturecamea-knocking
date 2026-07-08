@@ -356,6 +356,41 @@ body.role-guest .guest-readonly-note { display: block; }
 .share-badge { font-family: var(--mono); font-size: 8px; letter-spacing: 0.12em; padding: 1px 5px; margin-left: 6px; border-radius: 2px; vertical-align: middle; white-space: nowrap; }
 .share-badge.shared { color: var(--gold); border: 1px solid var(--gold-dim); }
 .share-badge.personal { color: var(--ink-faint); border: 1px solid var(--rule); }
+.stats-charts { display: grid; grid-template-columns: 1fr; gap: 16px; margin-top: 14px; }
+@media (min-width: 700px) { .stats-charts { grid-template-columns: 3fr 2fr; } }
+.chart-block { background: var(--paper-raised); border: 1px solid var(--rule); padding: 14px 16px; min-width: 0; }
+.chart-title { font-family: var(--mono); font-size: 10px; letter-spacing: 0.2em; color: var(--gold); text-transform: uppercase; margin-bottom: 12px; }
+.chart-bars { display: flex; align-items: flex-end; gap: 4px; height: 122px; overflow-x: auto; padding-bottom: 2px; }
+.chart-col { display: flex; flex-direction: column; align-items: center; gap: 3px; min-width: 24px; flex: 1; }
+.chart-bar-wrap { display: flex; align-items: flex-end; height: 86px; width: 100%; }
+.chart-bar { width: 100%; background: var(--gold-dim); border-top: 2px solid var(--gold); min-height: 2px; }
+.chart-cnt { font-family: var(--mono); font-size: 9px; color: var(--ink-dim); }
+.chart-mon { font-family: var(--mono); font-size: 8px; color: var(--ink-faint); white-space: nowrap; }
+.chart-empty { color: var(--ink-faint); font-style: italic; font-size: 12px; padding: 20px 0; text-align: center; }
+.donut-wrap { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.donut { width: 108px; height: 108px; border-radius: 50%; position: relative; flex: 0 0 auto; }
+.donut::after { content: ''; position: absolute; inset: 26px; background: var(--paper-raised); border-radius: 50%; }
+.donut-legend { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--ink-dim); }
+.donut-leg { display: flex; align-items: center; gap: 6px; }
+.donut-dot { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+.rate-line { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
+.rate-review-text { font-size: 12px; color: var(--ink-dim); font-style: italic; }
+.rate-editor { display: flex; flex-direction: column; gap: 14px; }
+.rate-hex { position: relative; align-self: center; width: 168px; height: 168px; }
+.rate-avg { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-family: var(--serif-display); font-style: italic; font-size: 30px; color: var(--gold); pointer-events: none; }
+.rate-rows { display: flex; flex-direction: column; gap: 9px; }
+.rate-row { display: flex; align-items: center; gap: 10px; }
+.rate-label { width: 78px; font-size: 12px; color: var(--ink-dim); flex: 0 0 auto; }
+.rate-dots { display: flex; gap: 6px; }
+.rate-dot { width: 20px; height: 20px; border-radius: 50%; border: 1px solid var(--rule); cursor: pointer; }
+.rate-dot.on { background: var(--gold); border-color: var(--gold); }
+.rate-num { width: 14px; text-align: center; font-family: var(--mono); font-size: 12px; color: var(--gold); }
+.rate-review { width: 100%; background: var(--paper-deep); border: 1px solid var(--rule); color: var(--ink); padding: 8px; font-family: var(--serif-body); font-size: 13px; box-sizing: border-box; }
+.rate-actions { display: flex; gap: 10px; }
+.wl-star { cursor: pointer; margin-left: 6px; color: var(--rule); font-size: 13px; }
+.wl-star.on { color: var(--gold); }
+.actor-row.wl-on { background: rgba(184, 155, 94, 0.06); }
+.wl-badge { font-family: var(--mono); font-size: 8px; letter-spacing: 0.1em; padding: 1px 5px; margin-left: 6px; border-radius: 2px; color: var(--gold); border: 1px solid var(--gold-dim); }
 
 /* EXCEL IMPORT */
 .excel-section { background: var(--paper-raised); border: 1px solid var(--rule); padding: 24px; margin-bottom: 24px; }
@@ -796,6 +831,11 @@ body.role-guest .guest-readonly-note { display: block; }
     </div>
 
     <div class="stats-grid" id="topStats"></div>
+
+    <div style="margin-bottom: 20px;">
+      <button class="mini-btn" id="chartToggle" style="padding:6px 14px;">📊 차트 보기</button>
+      <div id="statsCharts" class="stats-charts" style="display:none;"></div>
+    </div>
 
     <div class="history-controls">
       <input type="text" id="statsSearch" placeholder="배우명 검색…" style="flex: 1; min-width: 200px;">
@@ -1501,6 +1541,7 @@ function loadState() {
     schemaVersion: APP_SCHEMA_VERSION,
     visits,
     actorTags: {},
+    watchlist: [],
     characters: defaultCharacters(),
     scenes: defaultScenes(),
     performerCheckins: {}
@@ -3222,7 +3263,7 @@ function renderHistory() {
           <div class="visit-header-left">
             <span class="visit-num">${numLabel}</span>
             <div>
-              <div class="visit-date">${escapeHtml(dateLabel)}${watchedBadge}${manderleyBadge}${shareBadgeHtml(v)}</div>
+              <div class="visit-date">${escapeHtml(dateLabel)}${watchedBadge}${manderleyBadge}${shareBadgeHtml(v)}${watchlistBadgeHtml(v)}</div>
               <div class="visit-meta">${v.entries.length} encounters${castingEntries.length ? ' · ' + castingEntries.length + ' cast' : ''}${v.isLegacy ? ' · ' + (v.legacyViewCount || 0) + ' visits' : ''}</div>
             </div>
           </div>
@@ -3233,6 +3274,7 @@ function renderHistory() {
           ${sections}
           ${castingSection}
           ${v.notes && !visitMetaEditMode ? `<div class="visit-notes">${escapeHtml(v.notes)}</div>` : ''}
+          ${ratingLineHtml(v)}
         </div>
         ${actions}
       </div>
@@ -3279,6 +3321,7 @@ function renderHistory() {
   $$('.visit-card-header').forEach(h => {
     h.addEventListener('click', () => { $('#vbody-' + h.dataset.id).classList.toggle('open'); });
   });
+  $$('[data-rate-vid]').forEach(b => b.addEventListener('click', (e) => { e.stopPropagation(); openRatingEditor(b.dataset.rateVid); }));
   $$('[data-delete]').forEach(b => {
     b.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -3866,8 +3909,151 @@ let statsScope = 'watched'; // 'watched' or 'performances'
 let statsMonth = 'all';     // 'YYYY-MM' period filter for stats, or 'all'
 let statsView = 'performer'; // 'performer' or 'encounter'
 
+function inWatchlist(actor) { return (state.watchlist || []).includes(actor); }
+function toggleWatchlist(actor) {
+  if (guardGuest()) return;
+  if (!Array.isArray(state.watchlist)) state.watchlist = [];
+  const i = state.watchlist.indexOf(actor);
+  const adding = i < 0;
+  if (adding) state.watchlist.push(actor); else state.watchlist.splice(i, 1);
+  saveState();
+  queueWatchlistPush(actor);
+  renderStats();
+  renderHistory();
+  showToast(adding ? `${actor} 찜 추가` : `${actor} 찜 해제`);
+}
+function watchlistBadgeHtml(v) {
+  if (v.isLegacy || !(state.watchlist || []).length) return '';
+  const wl = new Set(state.watchlist);
+  const hits = new Set();
+  Object.values(v.casting || {}).forEach(a => splitActorString(a).forEach(x => { if (wl.has(x)) hits.add(x); }));
+  if (!hits.size) return '';
+  return `<span class="wl-badge" title="찜 배우: ${escapeHtml([...hits].join(', '))}">★${hits.size}</span>`;
+}
+const RATE_AXES = [['env','관극환경'],['cast','캐스팅'],['enc','인카운터'],['manner','관객매너'],['immersion','몰입도'],['route','동선']];
+function hexRadarSvg(vals, size) {
+  const cx = size / 2, cy = size / 2, R = size / 2 - 10;
+  const ang = i => Math.PI / 180 * (-90 + i * 60);
+  const pt = (i, r) => [cx + r * Math.cos(ang(i)), cy + r * Math.sin(ang(i))];
+  const ring = f => Array.from({ length: 6 }, (_, i) => pt(i, R * f).map(n => n.toFixed(1)).join(',')).join(' ');
+  const spokes = Array.from({ length: 6 }, (_, i) => { const p = pt(i, R); return `<line x1="${cx}" y1="${cy}" x2="${p[0].toFixed(1)}" y2="${p[1].toFixed(1)}" stroke="var(--rule)" stroke-width="0.5"/>`; }).join('');
+  const dpts = vals.map((v, i) => pt(i, R * (Math.max(0, Math.min(5, v || 0)) / 5)).map(n => n.toFixed(1)).join(',')).join(' ');
+  return `<svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}">`
+    + `<polygon points="${ring(1)}" fill="none" stroke="var(--rule)" stroke-width="1"/>`
+    + `<polygon points="${ring(0.667)}" fill="none" stroke="var(--rule)" stroke-width="0.5"/>`
+    + `<polygon points="${ring(0.333)}" fill="none" stroke="var(--rule)" stroke-width="0.5"/>`
+    + spokes
+    + `<polygon points="${dpts}" fill="rgba(184,155,94,0.28)" stroke="var(--gold)" stroke-width="1.5"/></svg>`;
+}
+function rateAvg(r) {
+  if (!r) return 0;
+  return RATE_AXES.reduce((s, a) => s + (r[a[0]] || 0), 0) / 6;
+}
+function ratingLineHtml(v) {
+  if (v.isLegacy) return '';
+  const rated = v.ratings && RATE_AXES.some(a => (v.ratings[a[0]] || 0) > 0);
+  return `<div class="rate-line">`
+    + `<button class="mini-btn rate-open" data-rate-vid="${escapeHtml(v.id)}">⬡ ${rated ? '평가 ' + rateAvg(v.ratings).toFixed(1) : '평가하기'}</button>`
+    + (v.review ? `<span class="rate-review-text">“${escapeHtml(v.review)}”</span>` : '')
+    + `</div>`;
+}
+function openRatingEditor(visitId) {
+  if (guardGuest()) return;
+  const v = state.visits.find(x => x.id === visitId);
+  if (!v) return;
+  const cur = { ...(v.ratings || {}) };
+  const dotsRow = (k, val) => [1, 2, 3, 4, 5].map(n => `<span class="rate-dot${n <= val ? ' on' : ''}" data-axis="${k}" data-val="${n}"></span>`).join('');
+  const rows = RATE_AXES.map(([k, label]) =>
+    `<div class="rate-row"><span class="rate-label">${label}</span><span class="rate-dots">${dotsRow(k, cur[k] || 0)}</span><span class="rate-num" data-num="${k}">${cur[k] || '-'}</span></div>`).join('');
+  const valsNow = () => RATE_AXES.map(([k]) => cur[k] || 0);
+  const anyNow = () => RATE_AXES.some(([k]) => cur[k] > 0);
+  const body = `<div class="rate-editor">`
+    + `<div class="rate-hex"><div id="rateHexSvg">${hexRadarSvg(valsNow(), 168)}</div><div class="rate-avg" id="rateAvg">${anyNow() ? rateAvg(cur).toFixed(1) : '—'}</div></div>`
+    + `<div class="rate-rows">${rows}</div>`
+    + `<textarea id="rateReview" class="rate-review" rows="2" placeholder="한줄평 (선택)">${escapeHtml(v.review || '')}</textarea>`
+    + `<div class="rate-actions"><button class="btn-save" id="rateSave">저장</button><button class="btn ghost" id="rateClear" style="width:auto;">평가 지우기</button></div></div>`;
+  openModal('회차 평가', `#${getVisitNumMap()[v.id] || ''} · ${escapeHtml(v.date || '')}`, body);
+  const box = $('#modalContent');
+  const ed = box.querySelector('.rate-editor');
+  const refresh = () => {
+    box.querySelector('#rateHexSvg').innerHTML = hexRadarSvg(valsNow(), 168);
+    box.querySelector('#rateAvg').textContent = anyNow() ? rateAvg(cur).toFixed(1) : '—';
+  };
+  ed.addEventListener('click', (e) => {
+    const dot = e.target.closest('.rate-dot');
+    if (dot) {
+      const k = dot.dataset.axis, n = parseInt(dot.dataset.val, 10);
+      cur[k] = (cur[k] === n) ? 0 : n;
+      box.querySelectorAll(`.rate-dot[data-axis="${k}"]`).forEach(d => d.classList.toggle('on', parseInt(d.dataset.val, 10) <= cur[k]));
+      const nm = box.querySelector(`[data-num="${k}"]`); if (nm) nm.textContent = cur[k] || '-';
+      refresh();
+      return;
+    }
+    if (e.target.id === 'rateClear') {
+      RATE_AXES.forEach(([k]) => cur[k] = 0);
+      box.querySelectorAll('.rate-dot').forEach(d => d.classList.remove('on'));
+      box.querySelectorAll('.rate-num').forEach(nm => nm.textContent = '-');
+      refresh();
+      return;
+    }
+    if (e.target.id === 'rateSave') {
+      const review = (box.querySelector('#rateReview').value || '').trim();
+      v.ratings = anyNow() ? RATE_AXES.reduce((o, [k]) => { if (cur[k] > 0) o[k] = cur[k]; return o; }, {}) : null;
+      v.review = review;
+      touchVisit(v);
+      saveState();
+      if (v.userAdded || (v.id && !v.id.startsWith('perf_'))) queueAddedVisitPush(v.id);
+      else queueVisitStatePush(v.id);
+      $('#modal').classList.remove('open');
+      renderHistory();
+      showToast('평가 저장됨');
+    }
+  });
+}
+
+function renderStatsCharts() {
+  const el = $('#statsCharts');
+  if (!el) return;
+  const wv = state.visits.filter(v => v.isWatched && !v.isLegacy);
+  // monthly watched counts
+  const byMonth = {};
+  wv.forEach(v => { if (v.date && v.date.length >= 7) { const m = v.date.slice(0, 7); byMonth[m] = (byMonth[m] || 0) + 1; } });
+  const months = Object.keys(byMonth).sort();
+  const maxM = Math.max(1, ...months.map(m => byMonth[m]));
+  const bars = months.map(m => {
+    const c = byMonth[m];
+    const h = Math.round(c / maxM * 100);
+    return `<div class="chart-col" title="${m} \u00b7 ${c}\ud68c">
+      <div class="chart-bar-wrap"><div class="chart-bar" style="height:${h}%;"></div></div>
+      <div class="chart-cnt">${c}</div><div class="chart-mon">${m.slice(2)}</div></div>`;
+  }).join('');
+  // encounter type breakdown
+  const tc = { '1:1': 0, '인터랙션': 0, '워크아웃': 0 };
+  wv.forEach(v => (v.entries || []).forEach(e => { const sc = getSceneById(e.sceneId); if (sc && tc[sc.type] !== undefined) tc[sc.type]++; }));
+  const totalEnc = tc['1:1'] + tc['인터랙션'] + tc['워크아웃'];
+  const colors = { '1:1': 'var(--blood-bright)', '인터랙션': 'var(--gold)', '워크아웃': 'var(--tag-azure)' };
+  let acc = 0; const segs = [];
+  ['1:1', '인터랙션', '워크아웃'].forEach(k => {
+    const pct = totalEnc ? (tc[k] / totalEnc * 100) : 0;
+    segs.push(`${colors[k]} ${acc.toFixed(2)}% ${(acc + pct).toFixed(2)}%`); acc += pct;
+  });
+  const donutBg = totalEnc ? `conic-gradient(${segs.join(', ')})` : 'var(--rule)';
+  const legend = ['1:1', '인터랙션', '워크아웃'].map(k =>
+    `<div class="donut-leg"><span class="donut-dot" style="background:${colors[k]};"></span>${k} <strong>${tc[k]}</strong> (${totalEnc ? Math.round(tc[k] / totalEnc * 100) : 0}%)</div>`).join('');
+  el.innerHTML = `
+    <div class="chart-block">
+      <div class="chart-title">월별 관극</div>
+      ${months.length ? `<div class="chart-bars">${bars}</div>` : '<div class="chart-empty">데이터 없음</div>'}
+    </div>
+    <div class="chart-block">
+      <div class="chart-title">인카운터 유형 · ${totalEnc}</div>
+      ${totalEnc ? `<div class="donut-wrap"><div class="donut" style="background:${donutBg};"></div><div class="donut-legend">${legend}</div></div>` : '<div class="chart-empty">데이터 없음</div>'}
+    </div>`;
+}
+
 function renderStats() {
   statsMonth = fillMonthSelect($('#statsMonth'), statsMonth);
+  if ($('#statsCharts') && $('#statsCharts').style.display !== 'none') renderStatsCharts();
   if (statsView === 'performer') {
     renderPerformerStats();
   } else {
@@ -3930,10 +4116,10 @@ function renderPerformerStats() {
     ).join(' · ');
     const moreRoles = roleEntries.length > 4 ? ` <span style="font-size: 10px; color: var(--ink-faint);">+${roleEntries.length - 4}</span>` : '';
     return `
-      <div class="actor-row" data-actor="${escapeHtml(name)}" style="cursor:pointer;">
+      <div class="actor-row${inWatchlist(name) ? ' wl-on' : ''}" data-actor="${escapeHtml(name)}" style="cursor:pointer;">
         <div class="rank">${i + 1}</div>
         <div><span class="actor-swatch" style="${dotStyle}" data-tag-actor="${escapeHtml(name)}" title="색 변경"></span></div>
-        <div class="name">${escapeHtml(name)}${isOneTimer ? '<span class="one-timer">1회성</span>' : ''}</div>
+        <div class="name">${escapeHtml(name)}${isOneTimer ? '<span class="one-timer">1회성</span>' : ''}<span class="wl-star${inWatchlist(name) ? ' on' : ''}" data-wl-actor="${escapeHtml(name)}" title="워치리스트 찜">★</span></div>
         <div class="count">${s.perfCount}</div>
         <div class="prob">${prob}%</div>
         <div class="bar"><div class="bar-fill" style="transform: scaleX(${barW/100})"></div></div>
@@ -3945,6 +4131,7 @@ function renderPerformerStats() {
   $$('.actor-row').forEach(row => {
     row.addEventListener('click', (e) => {
       if (e.target.classList.contains('actor-swatch')) return;
+      if (e.target.classList.contains('wl-star')) { toggleWatchlist(e.target.dataset.wlActor); return; }
       openActorModal(row.dataset.actor);
     });
   });
@@ -3994,10 +4181,10 @@ function renderEncounterStats() {
     const dotStyle = tag ? `background: ${COLOR_VARS[tag]};` : 'background: transparent; border: 1px dashed var(--rule);';
     const isOneTimer = ONE_TIMERS.has(name);
     return `
-      <div class="actor-row" data-actor="${escapeHtml(name)}" style="cursor:pointer;">
+      <div class="actor-row${inWatchlist(name) ? ' wl-on' : ''}" data-actor="${escapeHtml(name)}" style="cursor:pointer;">
         <div class="rank">${i + 1}</div>
         <div><span class="actor-swatch" style="${dotStyle}" data-tag-actor="${escapeHtml(name)}" title="색 변경"></span></div>
-        <div class="name">${escapeHtml(name)}${isOneTimer ? '<span class="one-timer">1회성</span>' : ''}</div>
+        <div class="name">${escapeHtml(name)}${isOneTimer ? '<span class="one-timer">1회성</span>' : ''}<span class="wl-star${inWatchlist(name) ? ' on' : ''}" data-wl-actor="${escapeHtml(name)}" title="워치리스트 찜">★</span></div>
         <div class="count">${count}</div>
         <div class="prob">${prob}%</div>
         <div class="bar"><div class="bar-fill" style="transform: scaleX(${barW/100})"></div></div>
@@ -4009,6 +4196,7 @@ function renderEncounterStats() {
   $$('.actor-row').forEach(row => {
     row.addEventListener('click', (e) => {
       if (e.target.classList.contains('actor-swatch')) return;
+      if (e.target.classList.contains('wl-star')) { toggleWatchlist(e.target.dataset.wlActor); return; }
       openActorModal(row.dataset.actor);
     });
   });
@@ -4034,6 +4222,13 @@ function cycleActorTag(actor) {
 
 $('#statsType').addEventListener('change', renderStats);
 $('#statsSort').addEventListener('change', renderStats);
+$('#chartToggle') && $('#chartToggle').addEventListener('click', () => {
+  const el = $('#statsCharts');
+  const open = el.style.display === 'none';
+  el.style.display = open ? '' : 'none';
+  $('#chartToggle').textContent = open ? '📊 차트 접기' : '📊 차트 보기';
+  if (open) renderStatsCharts();
+});
 $('#statsMonth') && $('#statsMonth').addEventListener('change', () => { statsMonth = $('#statsMonth').value; renderStats(); });
 $('#statsSearch') && $('#statsSearch').addEventListener('input', renderStats);
 
@@ -5949,7 +6144,7 @@ $('#exportSeedOnly') && $('#exportSeedOnly').addEventListener('click', exportSee
 
 // Admin only: promote personal (user-added) visits to SHARED performances.
 // date/matinee/casting -> everyone; my encounters/watched stay personal (user_visit_state).
-function promotePersonalToShared() {
+async function promotePersonalToShared() {
   if (guardGuest()) return;
   if (!currentUserIsAdmin) { showToast('관리자만 가능합니다'); return; }
   const targets = state.visits.filter(v => !v.isLegacy && v.userAdded && v.id && !v.id.startsWith('perf_') && v.date);
@@ -5957,24 +6152,33 @@ function promotePersonalToShared() {
   if (!confirm(`${targets.length}개의 개인 회차를 공유 공연으로 승격할까요?\n\n· 날짜 / 회차 / 캐스팅 → 모두에게 공유\n· 내 인카운터 / 관극 표시 → 내 개인 기록으로 유지\n\n(되돌리려면 상단 UNDO)`)) return;
   snapshotForUndo('개인 회차 → 공유 공연 승격');
   const now = Date.now();
-  let n = 0;
+  const oldIds = [];
   targets.forEach((v, i) => {
-    const oldId = v.id;
+    oldIds.push(v.id);
     const m = normalizeMatinee(v.matinee);
     const matSuffix = m === '마티네' ? '_m' : (m === '이브닝' ? '_e' : '_x');
     v.id = 'perf_' + (v.date || 'nd') + matSuffix + '_admin_' + now + '_' + i;
     v.userAdded = false;
     v.source = 'seed_perf';
     v.updatedAt = now;
-    queueAddedVisitPush(oldId);     // old personal row no longer has a visit -> deleted on flush
     queuePerformancePush(v.id);     // shared: date/matinee/casting/notes
     queueVisitStatePush(v.id);      // personal: my encounters/watched
-    n++;
   });
   saveState();
   renderHistory();
   renderHeader();
-  showToast(`${n}개 회차를 공유 공연으로 승격했습니다`);
+  // Hard-delete the old personal rows directly so a reload cannot resurrect them as
+  // duplicates (the queue "visit disappeared -> delete" heuristic was unreliable).
+  if (sb && currentUser && oldIds.length) {
+    try {
+      for (let i = 0; i < oldIds.length; i += 100) {
+        await sb.from('user_added_visits').delete().eq('user_id', currentUser.id).in('visit_id', oldIds.slice(i, i + 100));
+      }
+      oldIds.forEach(id => pushQueue.addedVisits.delete(id));
+      persistPushQueue();
+    } catch (e) { console.error('promote cleanup delete failed', e); }
+  }
+  showToast(`${oldIds.length}개 회차를 공유 공연으로 승격했습니다`);
 }
 $('#promoteToShared') && $('#promoteToShared').addEventListener('click', promotePersonalToShared);
 
@@ -7007,12 +7211,14 @@ async function fetchUserDataFromSupabase() {
   // Returns user's tags, watch state, added visits
   if (!sb || !currentUser) return null;
   const uid = currentUser.id;
-  const [tags, visitState, addedVisits] = await Promise.all([
+  const [tags, visitState, addedVisits, watchlist] = await Promise.all([
     sb.from('user_actor_tags').select('*').eq('user_id', uid),
     sb.from('user_visit_state').select('*').eq('user_id', uid),
-    sb.from('user_added_visits').select('*').eq('user_id', uid)
+    sb.from('user_added_visits').select('*').eq('user_id', uid),
+    sb.from('user_watchlist').select('*').eq('user_id', uid)
   ]);
   return {
+    watchlist: (watchlist.data || []).map(r => r.actor),
     actorTags: (tags.data || []).reduce((acc, r) => { acc[r.actor_name] = r.color; return acc; }, {}),
     visitState: (visitState.data || []).reduce((acc, r) => {
       acc[r.visit_id] = {
@@ -7020,7 +7226,9 @@ async function fetchUserDataFromSupabase() {
         entries: r.entries || [],
         userNotes: r.user_notes,
         userCasting: r.user_casting || {},
-        watchedAsManderley: !!r.watched_as_manderley
+        watchedAsManderley: !!r.watched_as_manderley,
+        ratings: r.ratings || null,
+        review: r.review || ''
       };
       return acc;
     }, {}),
@@ -7028,7 +7236,8 @@ async function fetchUserDataFromSupabase() {
       id: r.visit_id, date: r.date, matinee: r.matinee || '',
       notes: r.notes || '', casting: r.casting || {}, entries: r.entries || [],
       isWatched: r.is_watched, isLegacy: false, userAdded: true,
-      watchedAsManderley: !!r.watched_as_manderley
+      watchedAsManderley: !!r.watched_as_manderley,
+      ratings: r.ratings || null, review: r.review || ''
     }))
   };
 }
@@ -7037,7 +7246,7 @@ async function fetchUserDataFromSupabase() {
 // Debounced push to avoid hammering DB on every keystroke.
 // Queue persisted to localStorage so refresh/close doesn't lose pending writes.
 const PUSH_QUEUE_KEY = STORAGE_KEY + '_pushq';
-const pushQueue = { visitState: new Set(), tags: new Set(), addedVisits: new Set() };
+const pushQueue = { visitState: new Set(), tags: new Set(), addedVisits: new Set(), watchlist: new Set() };
 let pushTimer = null;
 let pushInFlight = false;
 let pushFailed = false;
@@ -7049,6 +7258,7 @@ function persistPushQueue() {
       visitState: [...pushQueue.visitState],
       tags: [...pushQueue.tags],
       addedVisits: [...pushQueue.addedVisits],
+      watchlist: [...pushQueue.watchlist],
       admin: {
         characters: [...adminPushQueue.characters],
         scenes: [...adminPushQueue.scenes],
@@ -7068,6 +7278,7 @@ function restorePushQueue() {
     (d.visitState || []).forEach(x => pushQueue.visitState.add(x));
     (d.tags || []).forEach(x => pushQueue.tags.add(x));
     (d.addedVisits || []).forEach(x => pushQueue.addedVisits.add(x));
+    (d.watchlist || []).forEach(x => pushQueue.watchlist.add(x));
     if (d.admin) {
       (d.admin.characters || []).forEach(x => adminPushQueue.characters.add(x));
       (d.admin.scenes || []).forEach(x => adminPushQueue.scenes.add(x));
@@ -7108,6 +7319,12 @@ function queueVisitStatePush(visitId) {
 function queueTagPush(actorName) {
   if (!sb || !currentUser) return;
   pushQueue.tags.add(actorName);
+  persistPushQueue();
+  schedulePush();
+}
+function queueWatchlistPush(actor) {
+  if (!sb || !currentUser) return;
+  pushQueue.watchlist.add(actor);
   persistPushQueue();
   schedulePush();
 }
@@ -7189,7 +7406,9 @@ async function _flushPushQueueInner() {
         entries: v.entries || [],
         user_notes: v.userNotes || '',
         user_casting: v.userCasting || {},
-        watched_as_manderley: !!v.watchedAsManderley
+        watched_as_manderley: !!v.watchedAsManderley,
+        ratings: v.ratings || null,
+        review: v.review || ''
       });
     }
   });
@@ -7220,6 +7439,24 @@ async function _flushPushQueueInner() {
   }
   if (tagOk) pushQueue.tags.clear();
 
+  // 2b. watchlist pushes
+  const wlUpserts = [];
+  const wlDeletes = [];
+  pushQueue.watchlist.forEach(actor => {
+    if ((state.watchlist || []).includes(actor)) wlUpserts.push({ user_id: uid, actor });
+    else wlDeletes.push(actor);
+  });
+  let wlOk = true;
+  if (wlUpserts.length > 0) {
+    const { error } = await sb.from('user_watchlist').upsert(wlUpserts, { onConflict: 'user_id,actor' });
+    if (error) { console.error('watchlist push error', error); hadError = true; wlOk = false; }
+  }
+  if (wlDeletes.length > 0) {
+    const { error } = await sb.from('user_watchlist').delete().eq('user_id', uid).in('actor', wlDeletes);
+    if (error) { console.error('watchlist delete error', error); hadError = true; wlOk = false; }
+  }
+  if (wlOk) pushQueue.watchlist.clear();
+
   // 3. user-added visits
   const avRows = [];
   const avDeletes = [];
@@ -7235,7 +7472,9 @@ async function _flushPushQueueInner() {
         casting: v.casting || {},
         entries: v.entries || [],
         is_watched: !!v.isWatched,
-        watched_as_manderley: !!v.watchedAsManderley
+        watched_as_manderley: !!v.watchedAsManderley,
+        ratings: v.ratings || null,
+        review: v.review || ''
       });
     } else if (!v) {
       avDeletes.push(vid);
@@ -7476,6 +7715,7 @@ async function loadFromSupabase() {
   if (userData) {
     // Only overwrite actorTags if Supabase has data (don't wipe local on empty)
     if (Object.keys(userData.actorTags).length > 0) state.actorTags = userData.actorTags;
+    if (Array.isArray(userData.watchlist)) state.watchlist = userData.watchlist;
     // Apply user visit state from Supabase to matching seed visits (only if exists)
     state.visits.forEach(v => {
       const u = userData.visitState[v.id];
@@ -7483,6 +7723,8 @@ async function loadFromSupabase() {
         v.isWatched = u.isWatched;
         v.entries = u.entries || v.entries;
         v.watchedAsManderley = !!u.watchedAsManderley;
+        v.ratings = u.ratings || null;
+        v.review = u.review || '';
         // Separate seed notes from user notes — never concatenate cumulatively
         if (!('seedNotes' in v)) v.seedNotes = v.notes || '';
         v.userNotes = u.userNotes || '';
