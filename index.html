@@ -7715,7 +7715,7 @@ async function loadFromSupabase() {
   if (userData) {
     // Only overwrite actorTags if Supabase has data (don't wipe local on empty)
     if (Object.keys(userData.actorTags).length > 0) state.actorTags = userData.actorTags;
-    if (Array.isArray(userData.watchlist)) state.watchlist = userData.watchlist;
+    if (userData.watchlist && userData.watchlist.length > 0) state.watchlist = userData.watchlist;
     // Apply user visit state from Supabase to matching seed visits (only if exists)
     state.visits.forEach(v => {
       const u = userData.visitState[v.id];
