@@ -1190,6 +1190,11 @@ const CHAR_RENAMES = {
   'J.Bagarran': 'J.Bargarran',  // typo in live data: missing 'r'. Canonical name lives in characterOrder[15].
 };
 
+// 명시적 공백(교체로 빠졌으나 아무도 안 들어옴 / 처음 비었다가 나중 투입) 센티넬.
+// 미입력(키 생략)과 구분. v.casting 문자열 안에 그대로 실려 저장되고,
+// castingActors()로 배우 집계에서 제외되며, 표시 시 '공백 · Empty' 칩으로 렌더.
+const CASTING_EMPTY = '(공백)';
+
 function normalizeName(name) {
   if (!name) return name;
   if (name.includes(' X ')) return name.split(' X ').map(p => NAME_MAP[p.trim()] || p.trim()).join(' X ');
@@ -1822,7 +1827,7 @@ function getAllActors() {
       splitActorString(e.actor).forEach(p => set.add(p));
     });
     Object.values(v.casting || {}).forEach(a => {
-      splitActorString(a).forEach(p => set.add(p));
+      castingActors(a).forEach(p => set.add(p));
     });
   });
   return sortActorList([...set]);
@@ -2246,6 +2251,7 @@ function castingSlotCellHtml(charName, slots, attrPrefix) {
         <div style="display:flex; gap:4px; align-items:center; margin-bottom:4px;">
           <select data-${attrPrefix}-char="${escapeHtml(charName)}" data-slot="${si}" style="flex:1; min-width:0;">
             <option value="">— 선택 —</option>
+            <option value="${escapeHtml(CASTING_EMPTY)}" ${cur === CASTING_EMPTY ? 'selected' : ''}>— 공백 (Empty) —</option>
             ${castingOptionsHtml(charName, cur)}
           </select>
           ${si > 0 ? `<button type="button" data-${attrPrefix}-remove="${escapeHtml(charName)}" data-slot="${si}" title="이 교체 제거" style="background:none;border:1px solid var(--rule);color:var(--ink-faint);cursor:pointer;font-size:11px;padding:2px 6px;line-height:1;flex:0 0 auto;">×</button>` : ''}
@@ -3266,7 +3272,7 @@ function renderHistory() {
               for (let k = 0; k < extras; k++) slots.push('');
               if (slots.length === 0) slots.push('');
               const opts = charDef ? charDef.actors : [];
-              const allOpts = [...new Set([...slots.filter(Boolean), ...opts])];
+              const allOpts = [...new Set([...slots.filter(Boolean), ...opts])].filter(a => a !== CASTING_EMPTY);
               return `
                 <div class="casting-cell" data-edit-cell="${escapeHtml(char)}">
                   <div class="char-name">${escapeHtml(char)}</div>
@@ -3274,6 +3280,7 @@ function renderHistory() {
                     <div style="display: flex; gap: 4px; align-items: center; margin-bottom: 4px;">
                       <select data-edit-vid="${v.id}" data-edit-char="${escapeHtml(char)}" data-slot="${si}" style="flex: 1;">
                         <option value="">— 비움 —</option>
+                        <option value="${escapeHtml(CASTING_EMPTY)}" ${s === CASTING_EMPTY ? 'selected' : ''}>— 공백 (Empty) —</option>
                         ${allOpts.map(a => `<option value="${escapeHtml(a)}" ${a === s ? 'selected' : ''}>${escapeHtml(a)}</option>`).join('')}
                       </select>
                       ${si > 0 ? `<button data-edit-rep-remove data-vid="${v.id}" data-edit-char="${escapeHtml(char)}" data-slot="${si}" style="background: none; border: 1px solid var(--rule); color: var(--ink-faint); cursor: pointer; font-size: 11px; padding: 2px 6px; line-height: 1;" title="이 교체 제거">×</button>` : ''}
@@ -3323,7 +3330,7 @@ function renderHistory() {
             return `
               <div class="visit-entry">
                 <span class="role">${escapeHtml(char)}</span>
-                <span class="actor"><span class="actor-name-display">${getActorDotHtml(actor)}${escapeHtml(actor)}</span> ${metaInline}${marker}</span>
+                <span class="actor"><span class="actor-name-display">${actor === CASTING_EMPTY ? castingEmptyChipHtml() : getActorDotHtml(actor) + escapeHtml(actor)}</span> ${metaInline}${marker}</span>
               </div>
             `;
           }).join('')}
@@ -3929,12 +3936,18 @@ function splitActorString(s) {
     .filter(Boolean);
 }
 
+// 배우 집계 전용: 공백 센티넬을 제외한 실제 배우만. (표시는 splitActorString 사용)
+function castingActors(str) { return splitActorString(str).filter(a => a !== CASTING_EMPTY); }
+function castingEmptyChipHtml() {
+  return `<span style="font-family:var(--mono);font-size:10px;letter-spacing:0.12em;color:var(--ink-faint);border:1px solid var(--rule);border-radius:2px;padding:1px 6px;opacity:0.85;">공백 · Empty</span>`;
+}
+
 // Get set of unique actors who appeared in a visit's casting (transcending roles, applying rules 8, 9)
 function getVisitActorAppearances(visit) {
   const actorRoles = new Map(); // actor → Set of roles played
   if (!visit.casting) return actorRoles;
   for (const [role, actorStr] of Object.entries(visit.casting)) {
-    const actors = splitActorString(actorStr);
+    const actors = castingActors(actorStr);
     for (const a of actors) {
       if (!actorRoles.has(a)) actorRoles.set(a, new Set());
       actorRoles.get(a).add(role);
@@ -4020,7 +4033,7 @@ function watchlistBadgeHtml(v) {
   if (v.isLegacy || !(state.watchlist || []).length) return '';
   const wl = new Set(state.watchlist);
   const hits = new Set();
-  Object.values(v.casting || {}).forEach(a => splitActorString(a).forEach(x => { if (wl.has(x)) hits.add(x); }));
+  Object.values(v.casting || {}).forEach(a => castingActors(a).forEach(x => { if (wl.has(x)) hits.add(x); }));
   if (!hits.size) return '';
   return `<span class="wl-badge" title="찜 배우: ${escapeHtml([...hits].join(', '))}">★${hits.size}</span>`;
 }
@@ -4572,19 +4585,22 @@ function renderCastingTracker() {
       if (!characterData[char]) {
         characterData[char] = { pool: [], meta: {}, actorCounts: {}, timeline: [], total: 0, lastNum: 0 };
       }
-      // Split replacement notation: each actor in the chain gets +1
-      const actors = splitActorString(actorStr);
-      // Dedup within a single visit (rule 8/9): same actor in same role same visit = 1
-      const uniqActors = [...new Set(actors)];
+      // Split replacement notation: each actor in the chain gets +1.
+      // Timeline includes the 공백(Empty) sentinel as a vacancy event, but actor
+      // distribution / total / debut exclude it (공백 is not an actor).
+      const tokens = [...new Set(splitActorString(actorStr))];
+      const realActors = tokens.filter(a => a !== CASTING_EMPTY);
       if (!characterData[char].actorDebut) characterData[char].actorDebut = {};
-      uniqActors.forEach(actor => {
-        characterData[char].actorCounts[actor] = (characterData[char].actorCounts[actor] || 0) + 1;
-        characterData[char].timeline.push({ visitId: v.id, date: v.date, num: numMap[v.id], actor });
-        if (v.date && !characterData[char].actorDebut[actor]) {
-          characterData[char].actorDebut[actor] = { date: v.date, num: numMap[v.id] };
+      tokens.forEach(tok => {
+        characterData[char].timeline.push({ visitId: v.id, date: v.date, num: numMap[v.id], actor: tok });
+        if (tok !== CASTING_EMPTY) {
+          characterData[char].actorCounts[tok] = (characterData[char].actorCounts[tok] || 0) + 1;
+          if (v.date && !characterData[char].actorDebut[tok]) {
+            characterData[char].actorDebut[tok] = { date: v.date, num: numMap[v.id] };
+          }
         }
       });
-      characterData[char].total += uniqActors.length;
+      characterData[char].total += realActors.length;
       characterData[char].lastNum = Math.max(characterData[char].lastNum, numMap[v.id]);
     });
   });
@@ -4700,10 +4716,11 @@ function renderCastingTracker() {
             const meta = d.meta[t.actor] || {};
             const sub = meta.subName ? ` <span class="sub-name">${escapeHtml(meta.subName)}</span>` : '';
             const status = meta.status ? ` <span class="status-badge ${statusBadgeClass(meta.status)}">${escapeHtml(meta.status)}</span>` : '';
+            const who = t.actor === CASTING_EMPTY ? castingEmptyChipHtml() : `${getActorDotHtml(t.actor)}${escapeHtml(t.actor)}${sub}${status}`;
             return `
               <div class="timeline-item">
                 <span class="timeline-when">#${t.num}${t.date ? ' · ' + t.date.slice(5) : ''}</span>
-                <span class="timeline-who">${getActorDotHtml(t.actor)}${escapeHtml(t.actor)}${sub}${status}</span>
+                <span class="timeline-who">${who}</span>
               </div>
             `;
           }).join('')}
@@ -5301,7 +5318,7 @@ $('#pairingFromChar').addEventListener('change', (e) => {
   if (charDef) charDef.actors.forEach(a => actors.add(a));
   state.visits.forEach(v => {
     if (v.casting && v.casting[char]) {
-      splitActorString(v.casting[char]).forEach(a => actors.add(a));
+      castingActors(v.casting[char]).forEach(a => actors.add(a));
     }
   });
   const actorList = sortActorList([...actors]);
@@ -5319,7 +5336,7 @@ function runPairingQuery() {
 
   const matchingVisits = state.visits.filter(v => {
     if (!v.casting || !v.casting[char]) return false;
-    return splitActorString(v.casting[char]).includes(actor);
+    return castingActors(v.casting[char]).includes(actor);
   });
   if (matchingVisits.length === 0) {
     out.innerHTML = `<div class="pairing-results-title">결과 없음</div><div style="color: var(--ink-faint); font-style: italic;">${escapeHtml(char)}가 ${escapeHtml(actor)}로 기록된 회차가 없습니다.</div>`;
@@ -5363,8 +5380,8 @@ function renderMatrix() {
   const pairs = {};
   state.visits.forEach(v => {
     if (!v.casting) return;
-    const aActors = v.casting[a] ? splitActorString(v.casting[a]) : [];
-    const bActors = v.casting[b] ? splitActorString(v.casting[b]) : [];
+    const aActors = v.casting[a] ? castingActors(v.casting[a]) : [];
+    const bActors = v.casting[b] ? castingActors(v.casting[b]) : [];
     if (aActors.length && bActors.length) {
       // For each combination of a×b actors in this visit, count once
       aActors.forEach(aA => {
@@ -5587,7 +5604,7 @@ function openActorModal(actor) {
     if (!v.casting) return;
     const seenInVisit = new Map();
     Object.entries(v.casting).forEach(([char, actorStr]) => {
-      const actors = splitActorString(actorStr);
+      const actors = castingActors(actorStr);
       for (const a of actors) {
         if (a === actor) {
           if (!seenInVisit.has(char)) seenInVisit.set(char, new Set());
