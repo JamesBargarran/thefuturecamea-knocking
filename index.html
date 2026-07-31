@@ -1187,6 +1187,7 @@ const CHAR_RENAMES = {
   'Agnes.N': 'Agnes Naismith',
   'M.Fulton': 'J.Fulton',
   'Speakeasy': 'The Speakeasy Bartender',
+  'J.Bagarran': 'J.Bargarran',  // typo in live data: missing 'r'. Canonical name lives in characterOrder[15].
 };
 
 function normalizeName(name) {
@@ -1252,7 +1253,14 @@ function reorderCharacters(chars) {
   const order = SEED_DATA.characterOrder || [];
   const orderIdx = {};
   order.forEach((n, i) => { orderIdx[n] = i; });
-  return [...chars].sort((a, b) => {
+  // Normalize legacy/typo'd character names (e.g. live-data 'J.Bagarran' -> 'J.Bargarran')
+  // BEFORE sorting, so a mis-spelled name matches characterOrder instead of sinking to the
+  // bottom via the ?? 999 fallback. Fixes both the displayed name and the cast ranking.
+  const normalized = chars.map(c => {
+    const fixed = c && c.name ? CHAR_RENAMES[c.name] : null;
+    return fixed && fixed !== c.name ? { ...c, name: fixed } : c;
+  });
+  return normalized.sort((a, b) => {
     const aI = orderIdx[a.name] ?? 999;
     const bI = orderIdx[b.name] ?? 999;
     if (aI !== bI) return aI - bI;
