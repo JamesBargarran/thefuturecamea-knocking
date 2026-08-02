@@ -1130,20 +1130,20 @@ body.app-loading::after { content: '동기화 중 · Loading…'; position: fixe
     </div>
 
     <div class="excel-card" style="margin-top:24px;">
-      <h4 style="font-family:var(--serif-display); font-size:18px; font-style:italic; margin-bottom:4px;">배우 이름 병합</h4>
-      <p style="color:var(--ink-dim); font-size:13px; margin-bottom:14px;">같은 배우가 오타 등으로 다른 이름 두 개로 갈라졌을 때 하나로 합칩니다. 모든 회차 캐스팅·인카운터·풀·태그·별표·체크인이 정규 이름으로 재작성됩니다. <strong>되돌리기(↶ UNDO)</strong>로 취소할 수 있어요.</p>
+      <h4 style="font-family:var(--serif-display); font-size:18px; font-style:italic; margin-bottom:4px;">배역 이름 병합</h4>
+      <p style="color:var(--ink-dim); font-size:13px; margin-bottom:14px;">같은 배역이 오타 등으로 다른 이름 두 개로 갈라졌을 때 하나로 합칩니다. 모든 회차 캐스팅(키)·캐릭터 풀·장면(role/구성)이 정규 배역명으로 재작성됩니다. <strong>되돌리기(↶ UNDO)</strong>로 취소할 수 있어요. <span class="admin-only" style="color:var(--gold);">공용 배역이므로 관리자 권한이 필요합니다.</span></p>
       <div style="display:grid; grid-template-columns:1fr auto 1fr; gap:10px; align-items:end;">
-        <div class="field" style="margin:0;"><label>합칠 이름 (사라짐)</label>
-          <input list="mergeActorList" id="mergeFrom" placeholder="예: J.Bagarran" autocomplete="off">
+        <div class="field" style="margin:0;"><label>합칠 배역 (사라짐)</label>
+          <input list="mergeCharList" id="mergeFrom" placeholder="예: J.Bagarran" autocomplete="off">
         </div>
         <div style="text-align:center; padding-bottom:10px; color:var(--gold); font-family:var(--mono); font-size:16px;">→</div>
-        <div class="field" style="margin:0;"><label>정규 이름 (유지)</label>
-          <input list="mergeActorList" id="mergeTo" placeholder="예: J.Bargarran" autocomplete="off">
+        <div class="field" style="margin:0;"><label>정규 배역 (유지)</label>
+          <input list="mergeCharList" id="mergeTo" placeholder="예: J.Bargarran" autocomplete="off">
         </div>
       </div>
-      <datalist id="mergeActorList"></datalist>
+      <datalist id="mergeCharList"></datalist>
       <div id="mergePreview" style="font-size:12px; color:var(--ink-faint); font-family:var(--mono); margin:12px 0 4px; min-height:16px;"></div>
-      <button class="mini-btn" id="doMergeActor" style="margin-top:6px;">배우 병합</button>
+      <button class="mini-btn" id="doMergeChar" style="margin-top:6px;">배역 병합</button>
     </div>
 
     <div class="danger-zone">
@@ -3153,108 +3153,97 @@ function queueCastingPush(v) {
   else queueVisitStatePush(v.id);
 }
 
-// ===== 배우 이름 병합 (오타로 갈라진 동일 배우 통합) =====================
-// 구분자(' → ' 교체 / ' X ' 콤보 / '/')를 보존하며 토큰 단위로 치환.
-// splitActorString은 구분자를 '|'로 뭉개므로 재조합에 쓸 수 없어 전용 헬퍼 사용.
-function renameActorInCastingValue(val, from, to) {
-  if (!val) return val;
-  return String(val).split(/( → | X |\/)/).map(tok =>
-    (tok === ' → ' || tok === ' X ' || tok === '/') ? tok : (tok.trim() === from ? to : tok)
-  ).join('');
-}
-// 프리뷰용: 해당 이름이 등장하는 non-legacy 회차 수 (perfCount 시맨틱)
-function mergeImpactPerfCount(name) {
+// ===== 배역(캐릭터) 이름 병합 (오타로 갈라진 동일 배역 통합) ==============
+// 배역명은 casting의 '키', state.characters[].name, scene의 role/linkedChar/composedOf에 등장.
+// (태그·별표·체크인·entries는 '배우' 대상이므로 배역 병합에서는 건드리지 않음.)
+// 프리뷰용: 해당 배역(casting 키)이 채워진 non-legacy 회차 수
+function mergeCharPerfCount(name) {
   let n = 0;
-  state.visits.forEach(v => { if (!v.isLegacy && getVisitActorAppearances(v).has(name)) n += 1; });
+  state.visits.forEach(v => {
+    if (v.isLegacy) return;
+    const cast = v.casting || {};
+    if (Object.prototype.hasOwnProperty.call(cast, name) && castingActors(cast[name]).length) n += 1;
+  });
   return n;
 }
-function mergeActor(fromName, toName) {
-  fromName = (fromName || '').trim();
-  toName = (toName || '').trim();
-  if (!fromName || !toName || fromName === toName) return false;
-  snapshotForUndo(`배우 병합: ${fromName} → ${toName}`);
+function mergeCharacter(fromChar, toChar) {
+  fromChar = (fromChar || '').trim();
+  toChar = (toChar || '').trim();
+  if (!fromChar || !toChar || fromChar === toChar) return false;
+  snapshotForUndo(`배역 병합: ${fromChar} → ${toChar}`);
 
-  // 1) 회차: casting(값) + entries(actor)
+  // 1) 회차 casting 의 '키' rename (fromChar → toChar)
   state.visits.forEach(v => {
-    if (v.casting) {
+    const inCast = v.casting && Object.prototype.hasOwnProperty.call(v.casting, fromChar);
+    const inSeed = v.seedCasting && Object.prototype.hasOwnProperty.call(v.seedCasting, fromChar);
+    const inUser = v.userCasting && Object.prototype.hasOwnProperty.call(v.userCasting, fromChar);
+    if (!inCast && !inSeed && !inUser) return;
+    const isSeedPerf = v.id && v.id.startsWith('perf_') && !v.userAdded;
+    if (isSeedPerf && !currentUserIsAdmin) {
+      // 비관리자는 시드 키를 지울 수 없으므로 userCasting 오버라이드로 처리(내 화면 기준)
+      const val = v.casting ? v.casting[fromChar] : undefined;
       const changes = {};
-      Object.keys(v.casting).forEach(role => {
-        const nv = renameActorInCastingValue(v.casting[role], fromName, toName);
-        if (nv !== v.casting[role]) changes[role] = nv;
+      if (val !== undefined && (!(toChar in v.casting) || !v.casting[toChar])) changes[toChar] = val;
+      changes[fromChar] = '';   // 시드 키 블랭크
+      applyCastingChange(v, changes, false);
+      queueCastingPush(v);
+    } else {
+      // 관리자/유저회차: casting·seedCasting·userCasting 의 키를 직접 rename
+      [v.casting, v.seedCasting, v.userCasting].forEach(obj => {
+        if (!obj || !Object.prototype.hasOwnProperty.call(obj, fromChar)) return;
+        if (!(toChar in obj) || !obj[toChar]) obj[toChar] = obj[fromChar]; // to 우선(이미 값 있으면 유지)
+        delete obj[fromChar];
       });
-      if (Object.keys(changes).length) {
-        applyCastingChange(v, changes, false); // 시드 회차는 내부에서 userCasting 경유
-        queueCastingPush(v);
-      }
-    }
-    let entriesChanged = false;
-    (v.entries || []).forEach(e => {
-      if (!e || !e.actor) return;
-      const nv = renameActorInCastingValue(e.actor, fromName, toName);
-      if (nv !== e.actor) { e.actor = nv; entriesChanged = true; }
-    });
-    if (entriesChanged) {
-      // entries는 added-visits / visit-state에 저장(공유 performances엔 없음) → 시드는 관리자여도 visit-state
-      if (v.userAdded || (v.id && !v.id.startsWith('perf_') && !v.isLegacy)) queueAddedVisitPush(v.id);
-      else if (v.id && v.id.startsWith('perf_')) queueVisitStatePush(v.id);
+      queueCastingPush(v);
     }
   });
 
-  // 2) 장면 풀
+  // 2) 캐릭터 풀 병합/이름변경
+  const fromIdx = state.characters.findIndex(c => c.name === fromChar);
+  if (fromIdx >= 0) {
+    const fromC = state.characters[fromIdx];
+    const toC = state.characters.find(c => c.name === toChar);
+    if (toC) {
+      toC.actors = [...new Set([...(toC.actors || []), ...(fromC.actors || [])])];
+      toC.actorMeta = { ...(fromC.actorMeta || {}), ...(toC.actorMeta || {}) }; // to 우선
+      state.characters.splice(fromIdx, 1);
+      queueCharacterPush(toC.name, true);
+      queueCharacterPush(fromChar, true); // state에서 사라짐 → characters 테이블 행 삭제
+    } else {
+      fromC.name = toChar;
+      queueCharacterPush(toChar, true);
+      queueCharacterPush(fromChar, true); // 옛 이름 행 삭제
+    }
+  }
+
+  // 3) 장면: role / linkedChar / composedOf
   state.scenes.forEach(s => {
-    if (!Array.isArray(s.actors) || !s.actors.includes(fromName)) return;
-    s.actors = [...new Set(s.actors.map(a => a === fromName ? toName : a))];
-    queueScenePush(s.id);
-  });
-
-  // 3) 캐릭터 풀 + actorMeta (to 우선)
-  state.characters.forEach(c => {
     let touched = false;
-    if (Array.isArray(c.actors) && c.actors.includes(fromName)) {
-      c.actors = [...new Set(c.actors.map(a => a === fromName ? toName : a))];
+    if (s.role === fromChar) { s.role = toChar; touched = true; }
+    if (s.linkedChar === fromChar) { s.linkedChar = toChar; touched = true; }
+    if (Array.isArray(s.composedOf) && s.composedOf.includes(fromChar)) {
+      s.composedOf = [...new Set(s.composedOf.map(x => x === fromChar ? toChar : x))];
       touched = true;
     }
-    if (c.actorMeta && c.actorMeta[fromName] !== undefined) {
-      c.actorMeta[toName] = { ...c.actorMeta[fromName], ...(c.actorMeta[toName] || {}) };
-      delete c.actorMeta[fromName];
-      touched = true;
-    }
-    if (touched) queueCharacterPush(c.name, true); // forceMeta: 원격 병합이 옛 키 부활시키지 않도록
+    if (touched) queueScenePush(s.id);
   });
-
-  // 4) 색상 태그 (to 우선). 옛 이름/새 이름 둘 다 큐잉 → orphan 행 삭제 + 새 행 upsert
-  if (state.actorTags && state.actorTags[fromName] !== undefined) {
-    if (state.actorTags[toName] === undefined) state.actorTags[toName] = state.actorTags[fromName];
-    delete state.actorTags[fromName];
-    queueTagPush(fromName); queueTagPush(toName);
-  }
-
-  // 5) 별표(워치리스트)
-  if (Array.isArray(state.watchlist) && state.watchlist.includes(fromName)) {
-    state.watchlist = [...new Set(state.watchlist.map(a => a === fromName ? toName : a))];
-    queueWatchlistPush(fromName); queueWatchlistPush(toName);
-  }
-
-  // 6) 체크인 (to 우선, 빈 필드는 from 보충) — 관리자만 내구성
-  if (state.performerCheckins && state.performerCheckins[fromName] !== undefined) {
-    state.performerCheckins[toName] = { ...(state.performerCheckins[fromName] || {}), ...(state.performerCheckins[toName] || {}) };
-    delete state.performerCheckins[fromName];
-    queueCheckinPush(fromName); queueCheckinPush(toName);
-  }
-
-  // 7) 숨김 목록
-  if (Array.isArray(state.hiddenPerformers) && state.hiddenPerformers.includes(fromName)) {
-    state.hiddenPerformers = [...new Set(state.hiddenPerformers.map(a => a === fromName ? toName : a))];
-  }
 
   saveState();
   return true;
 }
-// 병합 도구 UI 새로고침 (datalist + 프리뷰)
+// 병합 도구 UI 새로고침 (datalist + 프리뷰) — 배역(캐릭터/역할) 이름 후보
 function refreshMergeTool() {
-  const dl = $('#mergeActorList');
+  const dl = $('#mergeCharList');
   if (dl) {
-    const names = [...new Set([...getAllActors(), ...(state.hiddenPerformers || [])])].sort((a, b) => a.localeCompare(b));
+    const set = new Set();
+    state.characters.forEach(c => { if (c.name) set.add(c.name); });
+    state.visits.forEach(v => Object.keys(v.casting || {}).forEach(k => set.add(k)));
+    state.scenes.forEach(s => {
+      if (s.role) set.add(s.role);
+      if (s.linkedChar) set.add(s.linkedChar);
+      (s.composedOf || []).forEach(x => set.add(x));
+    });
+    const names = [...set].filter(Boolean).sort((a, b) => a.localeCompare(b));
     dl.innerHTML = names.map(n => `<option value="${escapeHtml(n)}"></option>`).join('');
   }
   updateMergePreview();
@@ -3265,33 +3254,33 @@ function updateMergePreview() {
   const from = ($('#mergeFrom') && $('#mergeFrom').value || '').trim();
   const to = ($('#mergeTo') && $('#mergeTo').value || '').trim();
   if (!from && !to) { box.textContent = ''; return; }
-  const fn = from ? mergeImpactPerfCount(from) : 0;
-  const tn = to ? mergeImpactPerfCount(to) : 0;
+  const fn = from ? mergeCharPerfCount(from) : 0;
+  const tn = to ? mergeCharPerfCount(to) : 0;
   if (from && to && from !== to) {
-    box.innerHTML = `<span style="color:var(--ink-dim);">${escapeHtml(from)} <strong>${fn}회</strong> → ${escapeHtml(to)} <strong>${tn}회</strong> 로 합칩니다.</span>`;
+    box.innerHTML = `<span style="color:var(--ink-dim);">${escapeHtml(from)} <strong>${fn}회</strong> → ${escapeHtml(to)} <strong>${tn}회</strong> 로 합칩니다 (병합 후 ${escapeHtml(to)}에 합산).</span>`;
   } else if (from) {
     box.innerHTML = `<span style="color:var(--ink-dim);">${escapeHtml(from)} <strong>${fn}회</strong></span>`;
   } else { box.textContent = ''; }
 }
 (function wireMergeTool() {
-  const fromEl = $('#mergeFrom'), toEl = $('#mergeTo'), btn = $('#doMergeActor');
+  const fromEl = $('#mergeFrom'), toEl = $('#mergeTo'), btn = $('#doMergeChar');
   if (fromEl) fromEl.addEventListener('input', updateMergePreview);
   if (toEl) toEl.addEventListener('input', updateMergePreview);
   if (btn) btn.addEventListener('click', () => {
     if (guardGuest && guardGuest()) return;
     const from = (fromEl.value || '').trim(), to = (toEl.value || '').trim();
-    if (!from || !to) { showToast('두 이름을 모두 입력하세요'); return; }
-    if (from === to) { showToast('서로 다른 이름을 입력하세요'); return; }
-    const fn = mergeImpactPerfCount(from), tn = mergeImpactPerfCount(to);
-    const warn = currentUserIsAdmin ? '' : '\n\n(관리자가 아니므로 공용 배우 풀·장면·체크인은 반영되지 않고, 내 캐스팅 기록에만 적용됩니다.)';
-    if (!confirm(`"${from}" (${fn}회) 을(를) "${to}" (${tn}회) 로 병합할까요?\n모든 회차·풀·태그·별표가 "${to}"로 재작성됩니다. (↶ UNDO로 취소 가능)${warn}`)) return;
-    if (mergeActor(from, to)) {
+    if (!from || !to) { showToast('두 배역명을 모두 입력하세요'); return; }
+    if (from === to) { showToast('서로 다른 배역명을 입력하세요'); return; }
+    const fn = mergeCharPerfCount(from), tn = mergeCharPerfCount(to);
+    const warn = currentUserIsAdmin ? '' : '\n\n(관리자가 아니므로 공용 캐릭터 풀·장면은 반영되지 않고, 내 캐스팅 기록에만 적용됩니다.)';
+    if (!confirm(`배역 "${from}" (${fn}회) 을(를) "${to}" (${tn}회) 로 병합할까요?\n모든 회차 캐스팅 키·캐릭터 풀·장면이 "${to}"로 재작성됩니다. (↶ UNDO로 취소 가능)${warn}`)) return;
+    if (mergeCharacter(from, to)) {
       fromEl.value = ''; toEl.value = '';
       renderHeader();
       renderHistory();
       renderActive(document.querySelector('.tab.active')?.dataset.page);
       refreshMergeTool();
-      showToast(`병합 완료: ${to}`);
+      showToast(`배역 병합 완료: ${to}`);
     }
   });
 })();
