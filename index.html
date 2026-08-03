@@ -1220,7 +1220,7 @@ if (SUPABASE_ENABLED && typeof supabase !== 'undefined') {
 // ============ BGM (private, owner-only) — 나만 재생되는 배경음악 ============
 // 아래 두 값을 채우세요. mp3는 Supabase의 PRIVATE 버킷에 올리고,
 // 같은 이메일로 storage.objects에 RLS SELECT 정책을 걸어야 합니다.
-const BGM_OWNER_EMAIL = 'fbekdud11@gmail.com';   // ← 내 로그인 이메일 (이 계정에서만 재생)
+const BGM_OWNER_EMAILS = ['fbekdud11@gmail.com', 'y_o_u123@naver.com']; // ← 내 로그인 이메일들 (이 계정들에서만 재생)
 const BGM_BUCKET = 'bgm';                          // Supabase Storage 비공개(private) 버킷 이름
 const BGM_PATHS = ['Ballroom.mp3', 'nightingale.mp3', 'overture.mp3', 'rave.mp3']; // 버킷 안 파일들 (순서=재생 순서)
 const BGM_SHUFFLE = false;                          // true = 랜덤 셔플
@@ -8682,7 +8682,7 @@ if (SUPABASE_ENABLED) {
 
 // ============ BGM (private cloud-locker, owner-only) ============
 // Playlist streamed from a PRIVATE Supabase Storage bucket via short-lived signed URLs.
-// Plays ONLY for BGM_OWNER_EMAIL - never for guests / other accounts, never a public URL.
+// Plays ONLY for accounts in BGM_OWNER_EMAILS - never guests / others, never a public URL.
 // Needs an RLS SELECT policy on storage.objects scoped to the same email (see setup notes).
 let _bgmEl = null, _bgmBtn = null, _bgmInit = false, _bgmArmed = false;
 let _bgmOrder = [], _bgmIdx = 0;
@@ -8696,8 +8696,8 @@ function bgmVolume() {
 function initBGM() {
   if (_bgmInit) return;                                              // set up once
   if (!sb || !SUPABASE_ENABLED) return;                             // needs Storage
-  if (!BGM_OWNER_EMAIL || BGM_OWNER_EMAIL.indexOf('@') < 0) return; // not configured yet
-  if (!currentUser || currentUser.email !== BGM_OWNER_EMAIL) return; // owner account only
+  if (!Array.isArray(BGM_OWNER_EMAILS) || !BGM_OWNER_EMAILS.length) return; // not configured yet
+  if (!currentUser || !BGM_OWNER_EMAILS.includes(currentUser.email)) return; // owner accounts only
   if (!Array.isArray(BGM_PATHS) || !BGM_PATHS.length) return;        // no tracks
   _bgmInit = true;
 
