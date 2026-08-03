@@ -1217,6 +1217,15 @@ if (SUPABASE_ENABLED && typeof supabase !== 'undefined') {
   });
 }
 
+// ============ BGM (private, owner-only) — 나만 재생되는 배경음악 ============
+// 아래 두 값을 채우세요. mp3는 Supabase의 PRIVATE 버킷에 올리고,
+// 같은 이메일로 storage.objects에 RLS SELECT 정책을 걸어야 합니다.
+const BGM_OWNER_EMAIL = 'fbekdud11@gmail.com';   // ← 내 로그인 이메일 (이 계정에서만 재생)
+const BGM_BUCKET = 'bgm';                          // Supabase Storage 비공개(private) 버킷 이름
+const BGM_PATHS = ['Ballroom.mp3', 'nightingale.mp3', 'overture.mp3', 'rave.mp3']; // 버킷 안 파일들 (순서=재생 순서)
+const BGM_SHUFFLE = false;                          // true = 랜덤 셔플
+const BGM_DEFAULT_VOLUME = 0.35;                   // 0.0 ~ 1.0
+
 // ============ STORAGE / MIGRATION ============
 const EMPTY_MODE = true;
 const FINAL_EMPTY = true;
@@ -8637,6 +8646,7 @@ function runApp() {
   const active = document.querySelector('.tab.active');
   if (active && active.dataset.page !== 'record') renderActive(active.dataset.page);
   document.body.classList.remove('app-loading');
+  initBGM();
 }
 
 // Auth event wiring
@@ -8668,6 +8678,150 @@ if (SUPABASE_ENABLED) {
       });
     }
   });
+}
+
+// ============ BGM (private cloud-locker, owner-only) ============
+// Playlist streamed from a PRIVATE Supabase Storage bucket via short-lived signed URLs.
+// Plays ONLY for BGM_OWNER_EMAIL - never for guests / other accounts, never a public URL.
+// Needs an RLS SELECT policy on storage.objects scoped to the same email (see setup notes).
+let _bgmEl = null, _bgmBtn = null, _bgmInit = false, _bgmArmed = false;
+let _bgmOrder = [], _bgmIdx = 0;
+
+function bgmOff() { return localStorage.getItem('snm_bgm_off') === '1'; }
+function bgmVolume() {
+  const v = parseFloat(localStorage.getItem('snm_bgm_vol'));
+  return isNaN(v) ? BGM_DEFAULT_VOLUME : Math.min(1, Math.max(0, v));
+}
+
+function initBGM() {
+  if (_bgmInit) return;                                              // set up once
+  if (!sb || !SUPABASE_ENABLED) return;                             // needs Storage
+  if (!BGM_OWNER_EMAIL || BGM_OWNER_EMAIL.indexOf('@') < 0) return; // not configured yet
+  if (!currentUser || currentUser.email !== BGM_OWNER_EMAIL) return; // owner account only
+  if (!Array.isArray(BGM_PATHS) || !BGM_PATHS.length) return;        // no tracks
+  _bgmInit = true;
+
+  _bgmOrder = BGM_PATHS.slice();
+  if (typeof BGM_SHUFFLE !== 'undefined' && BGM_SHUFFLE) {
+    for (let k = _bgmOrder.length - 1; k > 0; k--) {
+      const r = Math.floor(Math.random() * (k + 1));
+      const t = _bgmOrder[k]; _bgmOrder[k] = _bgmOrder[r]; _bgmOrder[r] = t;
+    }
+  }
+  const saved = parseInt(localStorage.getItem('snm_bgm_idx'), 10);
+  _bgmIdx = (!isNaN(saved) && saved >= 0 && saved < _bgmOrder.length) ? saved : 0;
+
+  const a = document.createElement('audio');
+  a.id = 'bgmAudio'; a.preload = 'auto'; a.volume = bgmVolume();
+  a.addEventListener('play', updateBgmBtn);
+  a.addEventListener('pause', updateBgmBtn);
+  a.addEventListener('ended', bgmNext);          // advance through the playlist, wrap around
+  document.body.appendChild(a);
+  _bgmEl = a;
+
+  buildBgmControl();
+  updateBgmBtn();
+
+  bgmLoad(_bgmIdx, false);                        // load current track (autoplay handled once armed)
+  armBgmAutostart();
+}
+
+function bgmLoad(index, autoplay) {
+  if (!_bgmEl || !_bgmOrder.length) return;
+  _bgmIdx = ((index % _bgmOrder.length) + _bgmOrder.length) % _bgmOrder.length;
+  localStorage.setItem('snm_bgm_idx', String(_bgmIdx));
+  updateBgmBtn();
+  const path = _bgmOrder[_bgmIdx];
+  // Sign lazily per track so a URL never expires mid-session.
+  sb.storage.from(BGM_BUCKET).createSignedUrl(path, 3600).then(({ data, error }) => {
+    if (error || !data || !data.signedUrl) { console.warn('BGM: signed URL failed for', path, error); return; }
+    _bgmEl.src = data.signedUrl;
+    if (!bgmOff() && (autoplay || _bgmArmed)) _bgmEl.play().catch(() => {});
+  }).catch(err => console.warn('BGM: storage error', err));
+}
+
+function bgmNext() { bgmLoad(_bgmIdx + 1, true); }
+
+function armBgmAutostart() {
+  const tryPlay = () => { if (_bgmEl && !bgmOff() && _bgmEl.src) _bgmEl.play().catch(() => {}); };
+  tryPlay();                                     // may be allowed if the site has media engagement
+  const onGesture = () => {                      // otherwise start on the first user interaction
+    document.removeEventListener('pointerdown', onGesture);
+    document.removeEventListener('keydown', onGesture);
+    _bgmArmed = true;
+    tryPlay();
+  };
+  document.addEventListener('pointerdown', onGesture);
+  document.addEventListener('keydown', onGesture);
+}
+
+function buildBgmControl() {
+  if (!document.getElementById('bgmStyle')) {
+    const st = document.createElement('style');
+    st.id = 'bgmStyle';
+    st.textContent = `
+#bgmCtl{position:fixed;right:16px;bottom:16px;z-index:250;display:flex;align-items:center;gap:6px;padding:6px 9px;background:var(--paper-raised);border:1px solid var(--gold-dim);border-radius:999px;box-shadow:0 2px 12px rgba(0,0,0,.45);opacity:.5;transition:opacity .25s;font-family:var(--mono);}
+#bgmCtl:hover{opacity:1;}
+#bgmCtl button{width:28px;height:28px;border-radius:50%;border:1px solid var(--gold);background:transparent;color:var(--gold-dim);font-size:12px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:color .2s,border-color .2s,text-shadow .2s;padding:0;}
+#bgmBtn.playing{color:var(--gold);border-color:var(--gold);text-shadow:0 0 8px var(--gold);}
+#bgmVol{width:60px;height:3px;accent-color:var(--gold);cursor:pointer;}
+@media(max-width:600px){#bgmCtl{opacity:.4;}#bgmVol{width:44px;}}
+`;
+    document.head.appendChild(st);
+  }
+  const wrap = document.createElement('div');
+  wrap.id = 'bgmCtl';
+
+  const btn = document.createElement('button');
+  btn.id = 'bgmBtn'; btn.type = 'button';
+  btn.addEventListener('click', toggleBgm);
+
+  const nextBtn = document.createElement('button');
+  nextBtn.id = 'bgmNext'; nextBtn.type = 'button'; nextBtn.textContent = '⏭';
+  nextBtn.title = '다음 곡';
+  nextBtn.addEventListener('click', () => bgmLoad(_bgmIdx + 1, true));
+
+  const vol = document.createElement('input');
+  vol.id = 'bgmVol'; vol.type = 'range'; vol.min = '0'; vol.max = '1'; vol.step = '0.01';
+  vol.value = String(bgmVolume());
+  vol.addEventListener('input', () => {
+    const v = parseFloat(vol.value);
+    if (_bgmEl) _bgmEl.volume = v;
+    localStorage.setItem('snm_bgm_vol', String(v));
+  });
+
+  wrap.appendChild(btn); wrap.appendChild(nextBtn); wrap.appendChild(vol);
+  document.body.appendChild(wrap);
+  _bgmBtn = btn;
+}
+
+function toggleBgm() {
+  if (!_bgmEl) return;
+  if (_bgmEl.paused) {
+    localStorage.removeItem('snm_bgm_off');
+    _bgmArmed = true;
+    if (_bgmEl.src) _bgmEl.play().catch(() => {});
+    else bgmLoad(_bgmIdx, true);
+  } else {
+    _bgmEl.pause();
+    localStorage.setItem('snm_bgm_off', '1');
+  }
+  updateBgmBtn();
+}
+
+function bgmTrackName() {
+  const p = _bgmOrder[_bgmIdx] || '';
+  return p.replace(/^.*\//, '').replace(/\.[^.]+$/, '');
+}
+
+function updateBgmBtn() {
+  if (!_bgmBtn) return;
+  const playing = _bgmEl && !_bgmEl.paused;
+  _bgmBtn.textContent = playing ? '♪' : '▸';   // note when playing, play-triangle when stopped
+  _bgmBtn.classList.toggle('playing', !!playing);
+  const name = bgmTrackName();
+  _bgmBtn.setAttribute('aria-label', playing ? 'BGM 정지' : 'BGM 재생');
+  _bgmBtn.title = (playing ? 'BGM 재생 중' : 'BGM 정지됨') + (name ? ' · ' + name + ' · 눌러서 전환' : '');
 }
 
 // Start the app
