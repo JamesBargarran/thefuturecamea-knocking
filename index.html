@@ -333,6 +333,8 @@ body.app-loading::after { content: '동기화 중 · Loading…'; position: fixe
 .pool-card .pool-char-aliases label { display: block; font-family: var(--mono); font-size: 9px; letter-spacing: 0.15em; color: var(--gold); text-transform: uppercase; }
 .pool-card .pool-char-aliases input { width: 100%; box-sizing: border-box; margin-top: 4px; background: var(--paper-deep); border: 1px solid var(--rule); color: var(--ink); font-family: var(--serif-body); font-size: 13px; padding: 5px 8px; }
 .char-alias-note { font-family: var(--mono); font-size: 9px; letter-spacing: 0.1em; color: var(--ink-faint); margin-top: 2px; }
+.alias-toggle { display: inline-flex; align-items: center; gap: 4px; font-family: var(--mono); font-size: 10px; letter-spacing: 0.1em; color: var(--gold); text-transform: uppercase; cursor: pointer; white-space: nowrap; }
+.alias-toggle input { accent-color: var(--gold); cursor: pointer; margin: 0; }
 .pool-actor-row { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; background: var(--paper-deep); border: 1px solid var(--rule); margin-bottom: 6px; }
 .pool-actor-row .pa-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
 .pool-actor-row .pa-controls { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
@@ -732,6 +734,7 @@ body.app-loading::after { content: '동기화 중 · Loading…'; position: fixe
         <div class="sub">Select what unfolded · 인카운터 장면을 체크하세요</div>
         <div class="scene-filter">
           <input type="text" id="sceneSearch" placeholder="배역명 또는 배우명 검색…">
+          <label class="alias-toggle" title="배역 별칭 표시/검색"><input type="checkbox" id="aliasShowRecord"> 별칭</label>
           <button class="pill active" data-type="all">전체</button>
           <button class="pill" data-type="1:1">1:1</button>
           <button class="pill" data-type="인터랙션">인터랙션</button>
@@ -902,6 +905,7 @@ body.app-loading::after { content: '동기화 중 · Loading…'; position: fixe
     <div class="section-rule"><div class="line"></div><div class="ornament">✦</div><div class="line"></div></div>
     <div class="history-controls">
       <input type="text" id="roleSearch" placeholder="배역명 검색…" style="flex: 1; min-width: 240px;">
+      <label class="alias-toggle" title="배역 별칭 표시/검색"><input type="checkbox" id="aliasShowRoles"> 별칭</label>
       <select id="roleType">
         <option value="all">전체</option>
         <option value="1:1">1:1</option>
@@ -950,6 +954,7 @@ body.app-loading::after { content: '동기화 중 · Loading…'; position: fixe
       <div class="casting-intro">각 회차마다 누가 어떤 캐릭터를 했는지 기록하면 여기에 자동으로 변천사가 쌓입니다. "캐스팅 풀 편집"에서 새 배우를 추가할 수 있습니다.</div>
       <div class="history-controls">
         <input type="text" id="castingSearch" placeholder="배역 또는 배우 검색…" style="flex: 1; min-width: 240px;">
+        <label class="alias-toggle" title="배역 별칭 표시/검색"><input type="checkbox" id="aliasShowCasting"> 별칭</label>
         <select id="castingSort">
           <option value="order">배역 순서</option>
           <option value="changes">변화 많은 순</option>
@@ -1792,6 +1797,7 @@ if (!state.performerCheckins) state.performerCheckins = {};
 if (!Array.isArray(state.hiddenPerformers)) state.hiddenPerformers = [];
 if (!state.characters) state.characters = defaultCharacters();
 if (!state.scenes) state.scenes = defaultScenes();
+if (!state.aliasShow) state.aliasShow = { casting: true, roles: true, record: true }; // 탭별 별칭 표시 토글(기본 켜짐)
 // 로드된 배역에서 별칭 맵 구축 → 변형 캐스팅 키를 정식명으로 정규화 → 배역 dedup-재정렬.
 rebuildCharAliasMap();
 normalizeCastingKeys(state.visits);
@@ -1870,6 +1876,17 @@ function getCharacterByName(name) {
   const canon = canonicalCharName(name);
   return state.characters.find(c => c.name === canon)
       || state.characters.find(c => c.name === name);
+}
+// 배역/역할 이름 → 그 배역의 별칭 배열 (표시/검색용). 없으면 [].
+function charAliases(name) {
+  const c = getCharacterByName(name);
+  return c && c.aliases ? c.aliases : [];
+}
+// 별칭 표시 조각 — '별칭:' 접두어 없이 텍스트만. show=false거나 별칭 없으면 빈 문자열.
+function aliasNoteHtml(name, show) {
+  if (!show) return '';
+  const al = charAliases(name);
+  return al.length ? `<div class="char-alias-note">${al.map(escapeHtml).join(', ')}</div>` : '';
 }
 // For scenes with linkedChar, the character's actors[] is authoritative; fall back to scene.actors
 function getSceneActors(scene) {
@@ -2073,11 +2090,13 @@ let sceneSearchTerm = '';
 function renderScenes() {
   const list = $('#scenesList');
   const term = sceneSearchTerm.toLowerCase().trim();
+  const aliasCb = $('#aliasShowRecord'); if (aliasCb) aliasCb.checked = !!state.aliasShow.record;
   const filtered = state.scenes.filter(s => {
     if (sceneFilterType !== 'all' && s.type !== sceneFilterType) return false;
     if (!term) return true;
     if (s.role.toLowerCase().includes(term)) return true;
     if (s.actors.some(a => a.toLowerCase().includes(term))) return true;
+    if (charAliases(s.linkedChar || s.role).some(al => al.toLowerCase().includes(term))) return true;
     return false;
   });
   list.innerHTML = filtered.map(s => {
@@ -2094,6 +2113,7 @@ function renderScenes() {
     <div class="scene-card" data-id="${s.id}">
       <div class="type-tag">${s.type} · ${count}${badges}</div>
       <div class="role-name">${escapeHtml(s.role)}</div>
+      ${aliasNoteHtml(s.linkedChar || s.role, state.aliasShow.record)}
     </div>
   `;}).join('') || '<div style="color: var(--ink-faint); padding: 20px; font-style: italic;">검색 결과 없음</div>';
 
@@ -2735,6 +2755,7 @@ function applyTeamBulkFill(team) {
 })();
 
 $('#sceneSearch').addEventListener('input', debounce((e) => { sceneSearchTerm = e.target.value; renderScenes(); }, 180));
+$('#aliasShowRecord') && $('#aliasShowRecord').addEventListener('change', (e) => { state.aliasShow.record = e.target.checked; saveState(); renderScenes(); });
 $$('#page-record .pill').forEach(pill => {
   pill.addEventListener('click', () => {
     $$('#page-record .pill').forEach(p => p.classList.remove('active'));
@@ -4786,6 +4807,7 @@ $('#statsView') && $('#statsView').addEventListener('change', (e) => {
 // ============ ROLES ============
 function renderRoles() {
   const term = $('#roleSearch').value.toLowerCase().trim();
+  const aliasCb = $('#aliasShowRoles'); if (aliasCb) aliasCb.checked = !!state.aliasShow.roles;
   const filterType = $('#roleType').value;
   const compFilter = $('#roleCompletion') ? $('#roleCompletion').value : 'all';
 
@@ -4837,6 +4859,7 @@ function renderRoles() {
     if (!term) return true;
     if (s.role.toLowerCase().includes(term)) return true;
     if (scenePool(s).some(a => a.toLowerCase().includes(term))) return true;
+    if (charAliases(s.linkedChar || s.role).some(al => al.toLowerCase().includes(term))) return true;
     return false;
   });
 
@@ -4849,6 +4872,7 @@ function renderRoles() {
     return `
       <div class="role-summary" data-scene="${s.id}">
         <div class="role-name">${escapeHtml(s.role)}${unseen ? ' <span style="font-family:var(--mono); font-size:9px; color:var(--blood-bright); letter-spacing:0.15em;">미경험</span>' : ''}</div>
+        ${aliasNoteHtml(s.linkedChar || s.role, state.aliasShow.roles)}
         <div class="role-type">${s.type}${s.linkedChar ? ` · ${escapeHtml(s.linkedChar)}` : ''}${s.userAdded && currentUserIsAdmin ? ' · 사용자' : ''}${perfLabel}</div>
         <div class="role-actors">
           ${actors.map(a => {
@@ -4868,6 +4892,7 @@ function renderRoles() {
 }
 
 $('#roleSearch').addEventListener('input', debounce(renderRoles, 180));
+$('#aliasShowRoles') && $('#aliasShowRoles').addEventListener('change', (e) => { state.aliasShow.roles = e.target.checked; saveState(); renderRoles(); });
 $('#roleType').addEventListener('change', renderRoles);
 $('#roleCompletion') && $('#roleCompletion').addEventListener('change', renderRoles);
 
@@ -4990,6 +5015,7 @@ $$('.casting-mode-toggle button').forEach(b => {
 
 function renderCastingTracker() {
   const term = $('#castingSearch').value.toLowerCase().trim();
+  const aliasCb = $('#aliasShowCasting'); if (aliasCb) aliasCb.checked = !!state.aliasShow.casting;
   const sort = $('#castingSort').value;
 
   const chronological = [...state.visits]
@@ -5160,7 +5186,7 @@ function renderCastingTracker() {
         <div class="char-header">
           <div>
             <div class="char-name">${escapeHtml(char)}</div>
-            ${(() => { const co = getCharacterByName(char); const al = co && co.aliases ? co.aliases : []; return al.length ? `<div class="char-alias-note">별칭: ${al.map(escapeHtml).join(', ')}</div>` : ''; })()}
+            ${aliasNoteHtml(char, state.aliasShow.casting)}
           </div>
           <div class="char-stat">${total > 0 ? total + '회 · ' + uniqueActors + '명' : '미기록'}</div>
         </div>
@@ -5172,6 +5198,7 @@ function renderCastingTracker() {
 }
 
 $('#castingSearch').addEventListener('input', debounce(renderCastingTracker, 180));
+$('#aliasShowCasting') && $('#aliasShowCasting').addEventListener('change', (e) => { state.aliasShow.casting = e.target.checked; saveState(); renderCastingTracker(); });
 $('#castingSort').addEventListener('change', renderCastingTracker);
 
 // BULK EDITOR
@@ -5508,6 +5535,7 @@ function renderScenePool() {
     if (scenePoolFilterType !== 'all' && s.type !== scenePoolFilterType) return false;
     if (!term) return true;
     if (s.role.toLowerCase().includes(term)) return true;
+    if (charAliases(s.linkedChar || s.role).some(al => al.toLowerCase().includes(term))) return true;
     return s.actors.some(a => a.toLowerCase().includes(term));
   });
 
@@ -8653,6 +8681,7 @@ window.addEventListener('storage', (e) => {
   if (e.key !== STORAGE_KEY || e.newValue == null) return;
   try {
     state = loadState();
+    if (!state.aliasShow) state.aliasShow = { casting: true, roles: true, record: true };
     rebuildCharAliasMap();
     normalizeCastingKeys(state.visits);
     state.characters = reorderCharacters(state.characters);
