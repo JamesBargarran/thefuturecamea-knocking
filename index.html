@@ -329,6 +329,10 @@ body.app-loading::after { content: '동기화 중 · Loading…'; position: fixe
 .pool-card input[type="date"] { -webkit-appearance: none; appearance: none; min-width: 0; }
 .pool-card .pool-char-name { font-family: var(--serif-display); font-size: 20px; font-style: italic; color: var(--ink); margin-bottom: 4px; }
 .pool-card .pool-char-meta { font-family: var(--mono); font-size: 10px; letter-spacing: 0.2em; color: var(--gold); text-transform: uppercase; margin-bottom: 12px; }
+.pool-card .pool-char-aliases { margin-bottom: 12px; }
+.pool-card .pool-char-aliases label { display: block; font-family: var(--mono); font-size: 9px; letter-spacing: 0.15em; color: var(--gold); text-transform: uppercase; }
+.pool-card .pool-char-aliases input { width: 100%; box-sizing: border-box; margin-top: 4px; background: var(--paper-deep); border: 1px solid var(--rule); color: var(--ink); font-family: var(--serif-body); font-size: 13px; padding: 5px 8px; }
+.char-alias-note { font-family: var(--mono); font-size: 9px; letter-spacing: 0.1em; color: var(--ink-faint); margin-top: 2px; }
 .pool-actor-row { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; background: var(--paper-deep); border: 1px solid var(--rule); margin-bottom: 6px; }
 .pool-actor-row .pa-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
 .pool-actor-row .pa-controls { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
@@ -1226,6 +1230,27 @@ const CHAR_RENAMES = {
   'J.Bagarran': 'J.Bargarran',  // typo in live data: missing 'r'. Canonical name lives in characterOrder[15].
 };
 
+// 배역 별칭(aliases): 변형 표기 -> 정식 배역명. state.characters[].aliases 에서 파생.
+// CHAR_RENAMES(정적 typo 교정)와 동일한 정규화 경로를 공유한다. state 로드/재할당 후 rebuild 필요.
+let CHAR_ALIAS_MAP = {};
+// Supabase characters.aliases 컬럼 존재 여부. 로드 시 프로브로 설정; false면 push 행에서 aliases를 생략(SQL 마이그레이션 전에도 기존 push가 안 깨지게).
+let CHARACTERS_HAS_ALIASES = true;
+function rebuildCharAliasMap() {
+  const m = {};
+  (state?.characters || []).forEach(c => {
+    (c.aliases || []).forEach(a => {
+      const k = (a || '').trim();
+      if (k && k !== c.name) m[k] = c.name;
+    });
+  });
+  CHAR_ALIAS_MAP = m;
+}
+// 정식 배역명 리졸버: 정적 typo 우선, 그다음 사용자 별칭.
+function canonicalCharName(name) {
+  if (!name) return name;
+  return CHAR_RENAMES[name] || CHAR_ALIAS_MAP[name] || name;
+}
+
 // 명시적 공백(교체로 빠졌으나 아무도 안 들어옴 / 처음 비었다가 나중 투입) 센티넬.
 // 미입력(키 생략)과 구분. v.casting 문자열 안에 그대로 실려 저장되고,
 // castingActors()로 배우 집계에서 제외되며, 표시 시 '공백 · Empty' 칩으로 렌더.
@@ -1261,11 +1286,31 @@ function migrateVisits(visits) {
   return visits;
 }
 
+// 별칭/typo 변형 캐스팅 '키'(배역명)를 정식명으로 정규화한다.
+// in-memory 전용 — push/queue를 절대 호출하지 않아 공유 클라우드(performances.casting)의 raw 변형키는 보존된다.
+// 매 로드마다 재파생되며 canonical->canonical은 no-op이라 멱등(양쪽 로드 경로에서 중복 실행 무해).
+// 같은 casting 오브젝트에 변형키와 정식키가 공존하면 non-empty-wins (mergeCharacter 규칙 재사용).
+function normalizeCastingKeys(visits) {
+  (visits || []).forEach(v => {
+    ['casting', 'seedCasting', 'userCasting'].forEach(prop => {
+      const obj = v[prop];
+      if (!obj) return;
+      Object.entries(obj).forEach(([rawKey, val]) => {
+        const canon = canonicalCharName(rawKey);
+        if (canon === rawKey) return;
+        if (!(canon in obj) || !obj[canon]) obj[canon] = val; // 정식키가 비었으면 변형값 이동
+        delete obj[rawKey];
+      });
+    });
+  });
+}
+
 function defaultCharacters() {
   return SEED_DATA.walkoutCharacters.map(c => ({
     name: c.name,
     actors: [...c.actors],
-    actorMeta: c.actorMeta ? JSON.parse(JSON.stringify(c.actorMeta)) : {}
+    actorMeta: c.actorMeta ? JSON.parse(JSON.stringify(c.actorMeta)) : {},
+    aliases: c.aliases ? [...c.aliases] : []
   }));
 }
 
@@ -1298,10 +1343,24 @@ function reorderCharacters(chars) {
   // BEFORE sorting, so a mis-spelled name matches characterOrder instead of sinking to the
   // bottom via the ?? 999 fallback. Fixes both the displayed name and the cast ranking.
   const normalized = chars.map(c => {
-    const fixed = c && c.name ? CHAR_RENAMES[c.name] : null;
+    const fixed = c && c.name ? canonicalCharName(c.name) : null;
     return fixed && fixed !== c.name ? { ...c, name: fixed } : c;
   });
-  return normalized.sort((a, b) => {
+  // 정식명이 같아진 중복 배역 병합 (예: 'J.Bagarran'+'J.Bargarran' -> 하나, 또는 별칭으로 이름이 겹친 경우).
+  // in-memory 전용, push 없음. 먼저 나온(정식) 항목을 survivor로 두고 배우/메타/별칭을 합친다.
+  const byName = new Map();
+  normalized.forEach(c => {
+    if (!c || !c.name) return;
+    const cur = byName.get(c.name);
+    if (!cur) { byName.set(c.name, c); return; }
+    cur.actors = [...new Set([...(cur.actors || []), ...(c.actors || [])])];
+    cur.actorMeta = { ...(c.actorMeta || {}), ...(cur.actorMeta || {}) }; // survivor 우선
+    if ((c.aliases && c.aliases.length) || (cur.aliases && cur.aliases.length)) {
+      cur.aliases = [...new Set([...(cur.aliases || []), ...(c.aliases || [])])];
+    }
+  });
+  const deduped = [...byName.values()];
+  return deduped.sort((a, b) => {
     const aI = orderIdx[a.name] ?? 999;
     const bI = orderIdx[b.name] ?? 999;
     if (aI !== bI) return aI - bI;
@@ -1733,6 +1792,10 @@ if (!state.performerCheckins) state.performerCheckins = {};
 if (!Array.isArray(state.hiddenPerformers)) state.hiddenPerformers = [];
 if (!state.characters) state.characters = defaultCharacters();
 if (!state.scenes) state.scenes = defaultScenes();
+// 로드된 배역에서 별칭 맵 구축 → 변형 캐스팅 키를 정식명으로 정규화 → 배역 dedup-재정렬.
+rebuildCharAliasMap();
+normalizeCastingKeys(state.visits);
+state.characters = reorderCharacters(state.characters);
 
 const ONE_TIMERS = new Set(SEED_DATA.oneTimers || []);
 
@@ -1802,7 +1865,12 @@ function getTotalViews() {
   return getWatchedCount();
 }
 function getSceneById(id) { return state.scenes.find(s => s.id === id); }
-function getCharacterByName(name) { return state.characters.find(c => c.name === name); }
+function getCharacterByName(name) {
+  if (!name) return undefined;
+  const canon = canonicalCharName(name);
+  return state.characters.find(c => c.name === canon)
+      || state.characters.find(c => c.name === name);
+}
 // For scenes with linkedChar, the character's actors[] is authoritative; fall back to scene.actors
 function getSceneActors(scene) {
   if (scene && scene.linkedChar) {
@@ -2021,7 +2089,7 @@ function renderScenes() {
     else count = s.actors.length + ' cast';
     const badges = (composed ? ' · <span style="color: var(--blood-bright);">조합</span>' : '') +
                    (freecombo ? ' · <span style="color: var(--blood-bright);">자유조합</span>' : '') +
-                   (s.userAdded ? ' · <span style="color: var(--blood-bright);">사용자 추가</span>' : '');
+                   (s.userAdded && currentUserIsAdmin ? ' · <span style="color: var(--blood-bright);">사용자 추가</span>' : '');
     return `
     <div class="scene-card" data-id="${s.id}">
       <div class="type-tag">${s.type} · ${count}${badges}</div>
@@ -4965,6 +5033,8 @@ function renderCastingTracker() {
   let entries = Object.entries(characterData).filter(([char, d]) => {
     if (!term) return true;
     if (char.toLowerCase().includes(term)) return true;
+    const chObj = getCharacterByName(char);
+    if (chObj && (chObj.aliases || []).some(al => al.toLowerCase().includes(term))) return true;
     return Object.keys(d.actorCounts).some(a => a.toLowerCase().includes(term))
         || d.pool.some(a => a.toLowerCase().includes(term));
   });
@@ -5088,7 +5158,10 @@ function renderCastingTracker() {
     return `
       <div class="character-card">
         <div class="char-header">
-          <div class="char-name">${escapeHtml(char)}</div>
+          <div>
+            <div class="char-name">${escapeHtml(char)}</div>
+            ${(() => { const co = getCharacterByName(char); const al = co && co.aliases ? co.aliases : []; return al.length ? `<div class="char-alias-note">별칭: ${al.map(escapeHtml).join(', ')}</div>` : ''; })()}
+          </div>
           <div class="char-stat">${total > 0 ? total + '회 · ' + uniqueActors + '명' : '미기록'}</div>
         </div>
         <div class="actor-distribution">${distribution}</div>
@@ -5234,6 +5307,11 @@ function renderPoolEditor() {
       <div class="pool-card" data-char-idx="${ci}">
         <div class="pool-char-name">${escapeHtml(c.name)}</div>
         <div class="pool-char-meta">${c.actors.length} actors in pool</div>
+        <div class="pool-char-aliases">
+          <label>별칭(표기 통합)
+            <input type="text" data-alias-input placeholder="쉼표 구분 (예: 뱅코, Banquo)" value="${escapeHtml((c.aliases || []).join(', '))}">
+          </label>
+        </div>
         <div class="pool-actor-list">
           ${c.actors.map((a, ai) => {
             const m = meta[a] || {};
@@ -5319,6 +5397,31 @@ function renderPoolEditor() {
         showToast('저장됨');
       });
     });
+
+    const aliasEl = $('input[data-alias-input]', card);
+    if (aliasEl) {
+      aliasEl.addEventListener('change', () => {
+        const parts = aliasEl.value.split(',').map(s => s.trim()).filter(Boolean);
+        const seen = new Set();
+        const cleaned = [];
+        parts.forEach(p => {
+          if (p === c.name) return;                 // 자기 정식명은 별칭 아님
+          if (seen.has(p)) return; seen.add(p);
+          // 다른 배역의 정식명/별칭과 충돌하면 무시 (별칭이 남의 집계를 가로채는 것 방지)
+          const conflict = state.characters.some(c2 =>
+            c2 !== c && (c2.name === p || (c2.aliases || []).includes(p)));
+          if (conflict) { showToast(`별칭 "${p}"는 다른 배역과 충돌 — 무시됨`); return; }
+          cleaned.push(p);
+        });
+        if (cleaned.length) c.aliases = cleaned; else delete c.aliases;
+        rebuildCharAliasMap();
+        normalizeCastingKeys(state.visits); // 기존 회차 즉시 재집계 (in-memory, push 없음)
+        saveState();
+        queueCharacterPush(c.name, true);
+        renderPoolEditor();
+        showToast('별칭 저장됨');
+      });
+    }
 
     $$('button[data-action="remove"]', card).forEach(btn => {
       btn.addEventListener('click', () => {
@@ -7683,7 +7786,7 @@ async function pushSeedToSupabase() {
   const { data: existingChars } = await sb.from('characters').select('name');
   const existingNames = new Set((existingChars || []).map(r => r.name));
   const charRows = SEED_DATA.walkoutCharacters
-    .map((c, idx) => ({ name: c.name, sort_idx: idx, actors: c.actors || [], actor_meta: c.actorMeta || {} }))
+    .map((c, idx) => ({ name: c.name, sort_idx: idx, actors: c.actors || [], actor_meta: c.actorMeta || {}, ...(CHARACTERS_HAS_ALIASES ? { aliases: c.aliases || [] } : {}) }))
     .filter(row => !existingNames.has(row.name)); // skip ones that already exist
   if (charRows.length > 0) {
     const { error } = await sb.from('characters').insert(charRows);
@@ -7734,16 +7837,19 @@ async function pushSeedToSupabase() {
 async function fetchSeedFromSupabase() {
   // Returns { characters, scenes, performances, performer_checkins } from Supabase
   if (!sb) return null;
-  const [chars, scenes, perfs, checkins, hidden] = await Promise.all([
+  const [chars, scenes, perfs, checkins, hidden, aliasProbe] = await Promise.all([
     sb.from('characters').select('*').order('sort_idx'),
     sb.from('scenes').select('*').order('sort_idx'),
     sb.from('performances').select('*').order('date'),
     sb.from('performer_checkins').select('*'),
-    sb.from('hidden_performers').select('actor_name')
+    sb.from('hidden_performers').select('actor_name'),
+    sb.from('characters').select('aliases').limit(1)   // aliases 컬럼 존재 프로브 (없으면 error)
   ]);
+  CHARACTERS_HAS_ALIASES = !aliasProbe.error;
   return {
     characters: (chars.data || []).map(r => ({
-      name: r.name, sort_idx: r.sort_idx, actors: r.actors || [], actorMeta: r.actor_meta || {}
+      name: r.name, sort_idx: r.sort_idx, actors: r.actors || [], actorMeta: r.actor_meta || {},
+      aliases: r.aliases || []
     })),
     scenes: (scenes.data || []).map(r => ({
       id: r.id, type: r.type, role: r.role, actors: r.actors || [],
@@ -8086,7 +8192,7 @@ async function _flushPushQueueInner() {
               metaToPush[actor] = merged;
             });
           }
-          rows.push({ name: c.name, sort_idx: state.characters.indexOf(c), actors: c.actors || [], actor_meta: metaToPush });
+          rows.push({ name: c.name, sort_idx: state.characters.indexOf(c), actors: c.actors || [], actor_meta: metaToPush, ...(CHARACTERS_HAS_ALIASES ? { aliases: c.aliases || [] } : {}) });
         }
         else deletes.push(name);
       });
@@ -8271,6 +8377,9 @@ async function loadFromSupabase() {
   const localCheckins = state.performerCheckins || {};
 
   if (seed.characters.length > 0) state.characters = reorderCharacters(seed.characters);
+  // 클라우드 별칭까지 반영해 맵 재구축 후 dedup-재정렬 (위 reorder는 로컬 별칭 기준이었음).
+  rebuildCharAliasMap();
+  state.characters = reorderCharacters(state.characters);
   // Merge seed-defined composedOf/freeCombo into Supabase scenes (so o19/o31 etc. get correct structure)
   if (seed.scenes.length > 0) state.scenes = mergeNewSeedScenes(seed.scenes).sort((a, b) => (a.sortIdx ?? 999) - (b.sortIdx ?? 999));
 
@@ -8387,6 +8496,7 @@ async function loadFromSupabase() {
     });
   }
 
+  normalizeCastingKeys(state.visits); // 변형 캐스팅 키 정규화 (in-memory, push 없음 — 공유 raw 보존)
   saveState();
   seedLoadComplete = true; // safe to push characters now — cloud data has been loaded
   return true;
@@ -8464,6 +8574,8 @@ async function bootApp() {
       const seed = await fetchSeedFromSupabase();
       if (seed) {
         if (seed.characters.length > 0) state.characters = reorderCharacters(seed.characters);
+        rebuildCharAliasMap();
+        state.characters = reorderCharacters(state.characters);
         if (seed.scenes.length > 0) state.scenes = mergeNewSeedScenes(seed.scenes).sort((a, b) => (a.sortIdx ?? 999) - (b.sortIdx ?? 999));
         if (seed.performances.length > 0) {
           state.visits = seed.performances.map(p => ({
@@ -8473,6 +8585,7 @@ async function bootApp() {
         }
         state.performerCheckins = seed.performer_checkins || {};
         state.hiddenPerformers = seed.hiddenPerformers || [];
+        normalizeCastingKeys(state.visits);
         saveState();
       }
     } catch (err) {
@@ -8540,6 +8653,9 @@ window.addEventListener('storage', (e) => {
   if (e.key !== STORAGE_KEY || e.newValue == null) return;
   try {
     state = loadState();
+    rebuildCharAliasMap();
+    normalizeCastingKeys(state.visits);
+    state.characters = reorderCharacters(state.characters);
     renderHeader();
     renderHistory();
     renderActive(document.querySelector('.tab.active')?.dataset.page);
