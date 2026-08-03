@@ -1128,6 +1128,7 @@ body.app-loading::after { content: '동기화 중 · Loading…'; position: fixe
     <div class="data-controls">
       <button class="btn ghost" id="exportJSON" style="width: auto;">JSON 백업 다운로드 (전체)</button>
       <button class="btn ghost" id="exportCSV" style="width: auto;">CSV 내보내기</button>
+      <button class="btn ghost" id="exportLegacyExcel" style="width: auto;">레거시 엑셀 다운로드</button>
       <button class="btn ghost" id="importJSON" style="width: auto;">JSON 가져오기</button>
       <input type="file" id="importFile" accept=".json" style="display: none;">
     </div>
@@ -6695,6 +6696,8 @@ $('#exportCSV').addEventListener('click', () => {
   showToast('CSV 내보내기 완료');
 });
 
+$('#exportLegacyExcel') && $('#exportLegacyExcel').addEventListener('click', exportLegacyExcel);
+
 $('#importJSON').addEventListener('click', () => $('#importFile').click());
 $('#importFile').addEventListener('change', (e) => {
   const file = e.target.files[0];
@@ -7326,6 +7329,35 @@ function exportBulkWatchExcel() {
   const label = bwMonthFilter || 'all';
   XLSX.writeFile(wb, `mckithan_관극기록_${label}_${new Date().toISOString().slice(0, 10)}.xlsx`);
   showToast(`엑셀 ${visits.length}회차 다운로드`);
+}
+
+// 레거시 데이터(회차별로 분리되지 않은 누적 관극) → 장면×배우×횟수 엑셀
+function exportLegacyExcel() {
+  if (typeof XLSX === 'undefined') { showToast('엑셀 모듈 로드 실패 — 네트워크 확인'); return; }
+  const typeOrder = { '1:1': 0, '인터랙션': 1, '워크아웃': 2 };
+  const rows = [];
+  (state.scenes || []).forEach(s => {
+    const lc = s.legacy_counts || {};
+    Object.entries(lc).forEach(([actor, cnt]) => {
+      if (cnt && cnt > 0) rows.push({ type: s.type || '', role: s.role || '', actor, cnt: Number(cnt), sortIdx: (typeof s.sortIdx === 'number' ? s.sortIdx : 999) });
+    });
+  });
+  if (!rows.length) { showToast('레거시 데이터가 없습니다'); return; }
+  rows.sort((a, b) => (a.sortIdx - b.sortIdx) || (b.cnt - a.cnt) || a.actor.localeCompare(b.actor));
+  const sum = rows.reduce((n, r) => n + r.cnt, 0);
+  const legacyVisit = (state.visits || []).find(v => v.isLegacy);
+  const totalViews = legacyVisit ? (legacyVisit.legacyViewCount || 0) : 0;
+  const aoa = [['유형', '장면 (배역)', '배우', '레거시 횟수']];
+  rows.forEach(r => aoa.push([r.type, r.role, r.actor, r.cnt]));
+  aoa.push([]);
+  aoa.push(['', '', '합계', sum]);
+  if (totalViews) aoa.push(['', '', '누적 관극(totalViews)', totalViews]);
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols'] = [{ wch: 12 }, { wch: 34 }, { wch: 24 }, { wch: 12 }];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '레거시 데이터');
+  XLSX.writeFile(wb, `SNM_레거시데이터_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  showToast(`레거시 ${rows.length}행 · 합계 ${sum} 다운로드`);
 }
 
 function renderBulkWatchExcel() {
