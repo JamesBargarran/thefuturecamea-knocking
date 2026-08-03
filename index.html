@@ -4849,7 +4849,7 @@ function renderRoles() {
     return `
       <div class="role-summary" data-scene="${s.id}">
         <div class="role-name">${escapeHtml(s.role)}${unseen ? ' <span style="font-family:var(--mono); font-size:9px; color:var(--blood-bright); letter-spacing:0.15em;">미경험</span>' : ''}</div>
-        <div class="role-type">${s.type}${s.linkedChar ? ` · ${escapeHtml(s.linkedChar)}` : ''}${s.userAdded ? ' · 사용자' : ''}${perfLabel}</div>
+        <div class="role-type">${s.type}${s.linkedChar ? ` · ${escapeHtml(s.linkedChar)}` : ''}${s.userAdded && currentUserIsAdmin ? ' · 사용자' : ''}${perfLabel}</div>
         <div class="role-actors">
           ${actors.map(a => {
             const c = counts[a] || 0;
