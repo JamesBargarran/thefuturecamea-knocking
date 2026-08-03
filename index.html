@@ -270,6 +270,24 @@ body.role-guest .team-bulk-bar,
 body.role-guest .excel-section,
 body.role-guest [data-auth-only] { display: none !important; }
 body:not(.role-admin) .admin-only { display: none !important; }
+/* Non-admin: hide edit controls in shared-pool management pages. Rosters/pools stay read-only.
+   (Edits by non-admins never sync to Supabase, so the controls would only mislead.) */
+body:not(.role-admin) #page-casting [data-mode="bulk"],
+body:not(.role-admin) #page-casting .pa-remove,
+body:not(.role-admin) #page-casting .pa-controls,
+body:not(.role-admin) #page-casting input[data-meta-field],
+body:not(.role-admin) #page-casting .add-mode-toggle,
+body:not(.role-admin) #page-casting .pool-add-row,
+body:not(.role-admin) #page-scenes .add-mode-toggle,
+body:not(.role-admin) #page-scenes .sp-controls,
+body:not(.role-admin) #page-scenes .sp-delete,
+body:not(.role-admin) #page-scenes [data-remove-actor],
+body:not(.role-admin) #page-scenes [data-make-composed],
+body:not(.role-admin) #page-scenes [data-add-component],
+body:not(.role-admin) #page-scenes [data-add-component-btn],
+body:not(.role-admin) #page-scenes [data-remove-composed],
+body:not(.role-admin) #page-scenes [data-remove-component],
+body:not(.role-admin) #page-performers [data-perf-field] { display: none !important; }
 body.role-guest .guest-readonly-note { display: block; }
 .guest-readonly-note { display: none; margin: 12px 0; padding: 10px 14px; border: 1px dashed var(--rule); color: var(--ink-faint); font-family: var(--mono); font-size: 11px; letter-spacing: 0.05em; }
 /* Boot: block interaction over stale localStorage until the Supabase load resolves. */
@@ -973,7 +991,7 @@ body.app-loading::after { content: '동기화 중 · Loading…'; position: fixe
       삭제하더라도 이미 그 장면에 기록된 회차 데이터는 보존됩니다 (단, 해당 카드는 더 이상 표시되지 않음).
     </div>
 
-    <div class="scene-pool-add">
+    <div class="scene-pool-add admin-only">
       <h4>새 장면 추가</h4>
       <div class="hint">유형을 선택하고 배역명을 입력한 후 추가하세요. 추가 후 카드에서 배우를 채워 넣으세요.</div>
       <div class="pool-add-row">
@@ -995,7 +1013,7 @@ body.app-loading::after { content: '동기화 중 · Loading…'; position: fixe
         <option value="인터랙션">인터랙션</option>
         <option value="워크아웃">워크아웃</option>
       </select>
-      <button id="bulkSyncLinkedBtn" style="background: var(--paper-raised); border: 1px solid var(--gold-dim); color: var(--gold); font-family: var(--mono); font-size: 10px; letter-spacing: 0.15em; text-transform: uppercase; padding: 8px 14px; cursor: pointer; white-space: nowrap;">장면 풀 일괄 동기화</button>
+      <button id="bulkSyncLinkedBtn" class="admin-only" style="background: var(--paper-raised); border: 1px solid var(--gold-dim); color: var(--gold); font-family: var(--mono); font-size: 10px; letter-spacing: 0.15em; text-transform: uppercase; padding: 8px 14px; cursor: pointer; white-space: nowrap;">장면 풀 일괄 동기화</button>
     </div>
 
     <div class="scene-pool-grid" id="scenePoolGrid"></div>
@@ -1114,8 +1132,8 @@ body.app-loading::after { content: '동기화 중 · Loading…'; position: fixe
       <input type="file" id="importFile" accept=".json" style="display: none;">
     </div>
 
-    <h3 style="font-family: var(--serif-display); font-size: 22px; font-style: italic; margin: 32px 0 12px;">관리자 배포 · Admin Distribution</h3>
-    <div class="excel-section" style="margin-bottom: 12px;">
+    <h3 class="admin-only" style="font-family: var(--serif-display); font-size: 22px; font-style: italic; margin: 32px 0 12px;">관리자 배포 · Admin Distribution</h3>
+    <div class="excel-section admin-only" style="margin-bottom: 12px;">
       <div class="excel-desc">
         <strong>관리자 (당신)</strong>가 캐스팅 풀과 회차를 관리하고, <strong>유저들</strong>은 본인 PC에서 본인의 관극 기록을 따로 작성하는 방식입니다.
         <br><br>
@@ -1129,7 +1147,7 @@ body.app-loading::after { content: '동기화 중 · Loading…'; position: fixe
       </div>
     </div>
 
-    <div class="excel-card" style="margin-top:24px;">
+    <div class="excel-card admin-only" style="margin-top:24px;">
       <h4 style="font-family:var(--serif-display); font-size:18px; font-style:italic; margin-bottom:4px;">배역 이름 병합</h4>
       <p style="color:var(--ink-dim); font-size:13px; margin-bottom:14px;">같은 배역이 오타 등으로 다른 이름 두 개로 갈라졌을 때 하나로 합칩니다. 모든 회차 캐스팅(키)·캐릭터 풀·장면(role/구성)이 정규 배역명으로 재작성됩니다. <strong>되돌리기(↶ UNDO)</strong>로 취소할 수 있어요. <span class="admin-only" style="color:var(--gold);">공용 배역이므로 관리자 권한이 필요합니다.</span></p>
       <div style="display:grid; grid-template-columns:1fr auto 1fr; gap:10px; align-items:end;">
@@ -1149,11 +1167,11 @@ body.app-loading::after { content: '동기화 중 · Loading…'; position: fixe
     <div class="danger-zone">
       <h4>위험 구역 · Danger</h4>
       <p style="margin-bottom: 12px; color: var(--ink-dim); font-size: 13px;">Legacy 시드 데이터를 삭제하면 기존 50회 누적 카운트가 사라집니다.</p>
-      <button class="mini-btn danger" id="deleteLegacy">Legacy 시드 삭제</button>
+      <button class="mini-btn danger admin-only" id="deleteLegacy">Legacy 시드 삭제</button>
       <button class="mini-btn danger" id="deleteCache" style="margin-left: 8px;">이 기기 캐시 초기화</button>
       <button class="mini-btn danger" id="deleteAccount" style="margin-left: 8px;" data-auth-only>계정 기록 전체 삭제</button>
-      <button class="mini-btn danger" id="resetPool" style="margin-left: 8px;">캐스팅 풀 기본값 복원</button>
-      <button class="mini-btn danger" id="resetScenes" style="margin-left: 8px;">장면 풀 기본값 복원</button>
+      <button class="mini-btn danger admin-only" id="resetPool" style="margin-left: 8px;">캐스팅 풀 기본값 복원</button>
+      <button class="mini-btn danger admin-only" id="resetScenes" style="margin-left: 8px;">장면 풀 기본값 복원</button>
     </div>
   </div>
 </div>
@@ -1856,17 +1874,28 @@ function getAllActors() {
 }
 // 숨김 퍼포머 헬퍼: 삭제해도 casting 기록에서 재파생되는 이름을 브라우즈 목록에서 제외
 function isHiddenPerformer(actor) { return (state.hiddenPerformers || []).includes(actor); }
+function queueHiddenPush(actor) {
+  // Hidden performer list is shared globally — only admins may mutate it.
+  if (!sb || !currentUserIsAdmin) return;
+  adminPushQueue.hidden.add(actor);
+  persistPushQueue();
+  schedulePush();
+}
 function hidePerformer(actor) {
   if (!actor) return;
+  if (!currentUserIsAdmin) return; // shared/global — admin only
   if (!Array.isArray(state.hiddenPerformers)) state.hiddenPerformers = [];
   if (!state.hiddenPerformers.includes(actor)) state.hiddenPerformers.push(actor);
   saveState();
+  queueHiddenPush(actor);
 }
 function unhidePerformer(actor) {
+  if (!currentUserIsAdmin) return; // shared/global — admin only
   if (!Array.isArray(state.hiddenPerformers)) { state.hiddenPerformers = []; return; }
   const i = state.hiddenPerformers.indexOf(actor);
   if (i >= 0) state.hiddenPerformers.splice(i, 1);
   saveState();
+  queueHiddenPush(actor);
 }
 
 function getActorMeta(charName, actorName) {
@@ -5410,7 +5439,7 @@ function renderScenePool() {
     return `
       <div class="scene-pool-card" data-scene="${s.id}">
         <div class="sp-name-row">
-          <div class="sp-name"><input type="text" value="${escapeHtml(s.role)}" data-edit-name></div>
+          <div class="sp-name"><input type="text" value="${escapeHtml(s.role)}" data-edit-name ${currentUserIsAdmin ? '' : 'readonly'}></div>
           <div class="sp-type">${s.type}${composed ? ' · 조합' : ''}${s.userAdded ? '<span class="user-added-tag">USER</span>' : ''}</div>
         </div>
         ${composedRow}
@@ -5438,7 +5467,7 @@ function renderScenePool() {
               <button data-sp-action="add-existing">추가</button>
             </div>
           `}
-          <div style="margin-top: 10px; border-top: 1px dotted var(--rule); padding-top: 8px;">
+          <div class="admin-only" style="margin-top: 10px; border-top: 1px dotted var(--rule); padding-top: 8px;">
             <div style="font-family: var(--mono); font-size: 9px; letter-spacing: 0.2em; color: var(--ink-faint); text-transform: uppercase; margin-bottom: 4px;">연결 배역</div>
             <select data-linked-char style="width: 100%; background: var(--paper-deep); border: 1px solid var(--rule); color: var(--ink); font-family: var(--serif-body); font-size: 12px; padding: 5px 8px;">
               <option value="">— 없음 —</option>
@@ -5797,7 +5826,7 @@ function renderPerformers() {
 
   const wrap = $('#performersList');
   const hiddenList = state.hiddenPerformers || [];
-  const hiddenBanner = hiddenList.length ? `
+  const hiddenBanner = (currentUserIsAdmin && hiddenList.length) ? `
     <div style="grid-column:1/-1; padding:10px 14px; background:var(--paper-raised); border:1px solid var(--rule); display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-bottom:4px;">
       <span style="font-family:var(--mono); font-size:10px; letter-spacing:0.18em; color:var(--gold); text-transform:uppercase;">숨긴 배우 ${hiddenList.length}명</span>
       ${hiddenList.map(a => `<span style="display:inline-flex; align-items:center; gap:5px; background:var(--paper-deep); border:1px solid var(--rule); padding:3px 8px; font-size:12px; color:var(--ink-dim);">${escapeHtml(a)}<button type="button" data-unhide-perf="${escapeHtml(a)}" title="복원" style="background:transparent; border:none; color:var(--gold); cursor:pointer; font-size:14px; line-height:1; padding:0;">↺</button></span>`).join('')}
@@ -5844,10 +5873,11 @@ function renderPerformers() {
           <div class="pool-char-name">${dotHtml}${escapeHtml(a)}</div>
           <div style="display:flex; align-items:center; gap:8px; flex:none;">
             <span style="font-family: var(--mono); font-size: 10px; letter-spacing: 0.15em;">${statusLabel}</span>
-            <button type="button" data-hide-perf="${escapeHtml(a)}" title="목록에서 숨김 (기록·통계는 보존)" style="background:transparent; border:1px solid var(--rule); color:var(--ink-faint); font-family:var(--mono); font-size:9px; letter-spacing:0.1em; padding:2px 7px; cursor:pointer; white-space:nowrap;">숨김</button>
+            ${currentUserIsAdmin ? `<button type="button" data-hide-perf="${escapeHtml(a)}" title="목록에서 숨김 (기록·통계는 보존)" style="background:transparent; border:1px solid var(--rule); color:var(--ink-faint); font-family:var(--mono); font-size:9px; letter-spacing:0.1em; padding:2px 7px; cursor:pointer; white-space:nowrap;">숨김</button>` : ''}
           </div>
         </div>
         <div class="pool-char-meta">${roles.length > 0 ? '배역: ' + roles.slice(0, 4).map(r => escapeHtml(r)).join(', ') + (roles.length > 4 ? ` +${roles.length - 4}` : '') : '풀에 없음'}</div>
+        ${currentUserIsAdmin ? `
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px;">
           <div class="field" style="margin: 0;"><label style="font-size: 9px;">체크인 · IN</label>
             <input type="date" data-perf-field="checkIn" data-perf-actor="${escapeHtml(a)}" value="${escapeHtml(c.checkIn || '')}">
@@ -5867,6 +5897,12 @@ function renderPerformers() {
         <div class="field" style="margin: 8px 0 0 0;"><label style="font-size: 9px;">메모</label>
           <input type="text" data-perf-field="notes" data-perf-actor="${escapeHtml(a)}" value="${escapeHtml(c.notes || '')}">
         </div>
+        ` : `
+        ${(c.checkIn || c.checkOut || c.notes) ? `<div style="margin-top:8px; font-family:var(--mono); font-size:10px; color:var(--ink-dim); display:flex; flex-direction:column; gap:2px;">
+          ${(c.checkIn || c.checkOut) ? `<div>기간: ${escapeHtml(c.checkIn || '?')} ~ ${escapeHtml(c.checkOut || '')}</div>` : ''}
+          ${c.notes ? `<div>메모: ${escapeHtml(c.notes)}</div>` : ''}
+        </div>` : ''}
+        `}
       </div>
     `;
   }).join('');
@@ -6840,6 +6876,8 @@ let bwMonthFilter = '';   // '' = all months
 let bulkWatchText = '';
 let bulkWatchResolved = null;   // last resolved paste plan (for apply)
 const bwExpanded = new Set();   // checklist: expanded visit ids
+const bwOpenMonths = new Set(); // checklist: expanded month groups (empty = all collapsed by default)
+let bwLastMonths = [];          // month keys shown by the last renderBwList (for 전체 펼치기)
 
 // Derive the actor the viewer saw for a scene, from that night's casting.
 function autoActorForScene(scene, visit) {
@@ -7071,14 +7109,18 @@ function renderBulkChecklist() {
       <label style="display:flex; align-items:center; gap:6px; font-family:var(--mono); font-size:11px; color:var(--ink-dim); white-space:nowrap; cursor:pointer;">
         <input type="checkbox" id="bwOnlyUnwatched"> 미관극만 보기
       </label>
+      <button class="mini-btn" id="bwExpandAll" style="padding:8px 12px;">전체 펼치기</button>
+      <button class="mini-btn" id="bwCollapseAll" style="padding:8px 12px;">전체 닫기</button>
       <button class="mini-btn" id="bwExcel" style="padding:8px 14px;">엑셀 다운로드</button>
     </div>
-    <div style="font-size:12px; color:var(--ink-faint); font-style:italic; margin-bottom:10px;">체크 = 관극 표시. 회차의 <strong>인카운터 ▾</strong>을 열어 그날 본 장면을 체크하면 배우가 자동 입력됩니다.</div>
+    <div style="font-size:12px; color:var(--ink-faint); font-style:italic; margin-bottom:10px;">월 이름을 눌러 펼치기/접기. 체크 = 관극 표시. 회차의 <strong>인카운터 ▾</strong>을 열어 그날 본 장면을 체크하면 배우가 자동 입력됩니다.</div>
     <div id="bwList"></div>`;
   const s = $('#bwSearch'); if (s) s.addEventListener('input', debounce(renderBwList, 180));
   const u = $('#bwOnlyUnwatched'); if (u) u.addEventListener('change', renderBwList);
   const mo = $('#bwMonth'); if (mo) mo.addEventListener('change', () => { bwMonthFilter = mo.value; renderBwList(); });
   const ex = $('#bwExcel'); if (ex) ex.addEventListener('click', exportBulkWatchExcel);
+  const exp = $('#bwExpandAll'); if (exp) exp.addEventListener('click', () => { bwLastMonths.forEach(m => bwOpenMonths.add(m)); renderBwList(); });
+  const col = $('#bwCollapseAll'); if (col) col.addEventListener('click', () => { bwOpenMonths.clear(); renderBwList(); });
   renderBwList();
 }
 
@@ -7099,16 +7141,22 @@ function renderBwList() {
   if (!visits.length) { listEl.innerHTML = '<div style="color:var(--ink-faint); font-style:italic; padding:16px;">조건에 맞는 회차가 없습니다.</div>'; return; }
   const groups = {};
   visits.forEach(v => { const mo = (v.date || '????-??').slice(0, 7); (groups[mo] = groups[mo] || []).push(v); });
-  listEl.innerHTML = Object.entries(groups).map(([mo, vs]) => `
+  bwLastMonths = Object.keys(groups);
+  listEl.innerHTML = Object.entries(groups).map(([mo, vs]) => {
+    const open = bwOpenMonths.has(mo);
+    return `
     <div style="margin-bottom:14px;">
       <div style="display:flex; align-items:center; gap:10px; margin-bottom:6px;">
-        <div style="font-family:var(--serif-display); font-style:italic; font-size:16px; color:var(--gold);">${escapeHtml(mo)}</div>
+        <button type="button" data-bw-toggle-month="${escapeHtml(mo)}" title="${open ? '접기' : '펼치기'}" style="display:flex; align-items:center; gap:6px; background:transparent; border:none; cursor:pointer; padding:0; font-family:var(--serif-display); font-style:italic; font-size:16px; color:var(--gold);">
+          <span style="font-family:var(--mono); font-size:12px; font-style:normal;">${open ? '▾' : '▸'}</span>${escapeHtml(mo)}
+        </button>
         <button class="mini-btn" data-bw-month="${escapeHtml(mo)}" style="padding:4px 10px;">이 달 전체 관극</button>
         <button class="mini-btn" data-bw-month-off="${escapeHtml(mo)}" style="padding:4px 10px;">전체 해제</button>
         <span style="font-family:var(--mono); font-size:10px; color:var(--ink-faint);">${vs.filter(v=>v.isWatched).length}/${vs.length} 관극</span>
       </div>
-      ${vs.map(v => bwRowHtml(v, numMap)).join('')}
-    </div>`).join('');
+      ${open ? vs.map(v => bwRowHtml(v, numMap)).join('') : ''}
+    </div>`;
+  }).join('');
   wireBwList();
 }
 
@@ -7196,6 +7244,11 @@ function wireBwList() {
   $$('[data-bw-expand]').forEach(b => b.addEventListener('click', () => {
     const id = b.dataset.bwExpand;
     if (bwExpanded.has(id)) bwExpanded.delete(id); else bwExpanded.add(id);
+    renderBwList();
+  }));
+  $$('[data-bw-toggle-month]').forEach(b => b.addEventListener('click', () => {
+    const mo = b.dataset.bwToggleMonth;
+    if (bwOpenMonths.has(mo)) bwOpenMonths.delete(mo); else bwOpenMonths.add(mo);
     renderBwList();
   }));
   $$('[data-bw-enc]').forEach(cb => cb.addEventListener('change', () => {
@@ -7605,22 +7658,27 @@ async function pushSeedToSupabase() {
     if (error) console.error('chars insert error', error);
   }
 
-  // 2. Scenes
-  const sceneRows = SEED_DATA.scenes.map(s => ({
-    id: s.id,
-    type: s.type,
-    role: s.role,
-    actors: s.actors || [],
-    legacy_counts: s.legacy_counts || {},
-    composed_of: s.composedOf || null,
-    free_combo: s.freeCombo || null,
-    sort_idx: s.sortIdx || 999,
-    user_added: false,
-    linked_char: s.linkedChar || null
-  }));
+  // 2. Scenes — like characters, only INSERT scenes that don't yet exist. Never upsert-overwrite,
+  //    which would blank hand-entered fields (e.g. linked_char) on an existing row during a reseed.
+  const { data: existingScenes } = await sb.from('scenes').select('id');
+  const existingSceneIds = new Set((existingScenes || []).map(r => r.id));
+  const sceneRows = SEED_DATA.scenes
+    .filter(s => !existingSceneIds.has(s.id))
+    .map(s => ({
+      id: s.id,
+      type: s.type,
+      role: s.role,
+      actors: s.actors || [],
+      legacy_counts: s.legacy_counts || {},
+      composed_of: s.composedOf || null,
+      free_combo: s.freeCombo || null,
+      sort_idx: s.sortIdx || 999,
+      user_added: false,
+      linked_char: s.linkedChar || null
+    }));
   if (sceneRows.length > 0) {
-    const { error } = await sb.from('scenes').upsert(sceneRows, { onConflict: 'id' });
-    if (error) console.error('scenes push error', error);
+    const { error } = await sb.from('scenes').insert(sceneRows);
+    if (error) console.error('scenes insert error', error);
   }
 
   // 3. Performances (chunked for size)
@@ -7644,11 +7702,12 @@ async function pushSeedToSupabase() {
 async function fetchSeedFromSupabase() {
   // Returns { characters, scenes, performances, performer_checkins } from Supabase
   if (!sb) return null;
-  const [chars, scenes, perfs, checkins] = await Promise.all([
+  const [chars, scenes, perfs, checkins, hidden] = await Promise.all([
     sb.from('characters').select('*').order('sort_idx'),
     sb.from('scenes').select('*').order('sort_idx'),
     sb.from('performances').select('*').order('date'),
-    sb.from('performer_checkins').select('*')
+    sb.from('performer_checkins').select('*'),
+    sb.from('hidden_performers').select('actor_name')
   ]);
   return {
     characters: (chars.data || []).map(r => ({
@@ -7669,7 +7728,8 @@ async function fetchSeedFromSupabase() {
     performer_checkins: (checkins.data || []).reduce((acc, r) => {
       acc[r.actor_name] = { checkIn: r.check_in, checkOut: r.check_out, status: r.status, notes: r.notes };
       return acc;
-    }, {})
+    }, {}),
+    hiddenPerformers: (hidden.data || []).map(r => r.actor_name)
   };
 }
 
@@ -7729,7 +7789,8 @@ function persistPushQueue() {
         characters: [...adminPushQueue.characters],
         scenes: [...adminPushQueue.scenes],
         performances: [...adminPushQueue.performances],
-        checkins: [...adminPushQueue.checkins]
+        checkins: [...adminPushQueue.checkins],
+        hidden: [...adminPushQueue.hidden]
       },
       forceMeta: [...adminForceMetaChars]
     }));
@@ -7750,6 +7811,7 @@ function restorePushQueue() {
       (d.admin.scenes || []).forEach(x => adminPushQueue.scenes.add(x));
       (d.admin.performances || []).forEach(x => adminPushQueue.performances.add(x));
       (d.admin.checkins || []).forEach(x => adminPushQueue.checkins.add(x));
+      (d.admin.hidden || []).forEach(x => adminPushQueue.hidden.add(x));
     }
     (d.forceMeta || []).forEach(x => adminForceMetaChars.add(x));
   } catch (e) {}
@@ -7758,7 +7820,7 @@ function restorePushQueue() {
 function pendingPushCount() {
   return pushQueue.visitState.size + pushQueue.tags.size + pushQueue.watchlist.size + pushQueue.addedVisits.size +
     adminPushQueue.characters.size + adminPushQueue.scenes.size +
-    adminPushQueue.performances.size + adminPushQueue.checkins.size;
+    adminPushQueue.performances.size + adminPushQueue.checkins.size + adminPushQueue.hidden.size;
 }
 
 function updateSyncIndicator() {
@@ -8036,6 +8098,18 @@ async function _flushPushQueueInner() {
       if (!ok) hadError = true;
       if (ok) ciBatch.forEach(actor => adminPushQueue.checkins.delete(actor));
     }
+    if (adminPushQueue.hidden.size > 0) {
+      const hidBatch = [...adminPushQueue.hidden];
+      const hidden = new Set(state.hiddenPerformers || []);
+      const rows = []; const deletes = [];
+      hidBatch.forEach(actor => {
+        if (hidden.has(actor)) rows.push({ actor_name: actor });
+        else deletes.push(actor);
+      });
+      const ok = await flushTable('hidden', 'hidden_performers', rows, 'actor_name', 'actor_name', deletes, null);
+      if (!ok) hadError = true;
+      if (ok) hidBatch.forEach(actor => adminPushQueue.hidden.delete(actor));
+    }
   }
   return hadError;
 }
@@ -8045,7 +8119,8 @@ const adminPushQueue = {
   characters: new Set(),  // by name
   scenes: new Set(),      // by id
   performances: new Set(),// by id
-  checkins: new Set()     // by actor_name
+  checkins: new Set(),    // by actor_name
+  hidden: new Set()       // hidden performer actor_name (shared globally)
 };
 // Characters whose actor_meta should be pushed AS-IS (no merge), because the user
 // explicitly edited team/availability/status and intends the local value to win —
@@ -8153,10 +8228,58 @@ async function loadFromSupabase() {
     (v.id && !v.id.startsWith('perf_'))
   );
 
-  // Update state from Supabase seed
+  // Update state from Supabase seed.
+  // Non-destructive merge: snapshot local hand-entered fields BEFORE overwriting, so a load
+  // (reload / redeploy) can never silently wipe admin-entered data that hasn't synced yet
+  // (e.g. scene 연결배역/linkedChar, hand-added pool actors, character team/availability).
+  const localSceneById = {};
+  (state.scenes || []).forEach(s => { localSceneById[s.id] = s; });
+  const localCharByName = {};
+  (state.characters || []).forEach(c => { localCharByName[c.name] = c; });
+  const localCheckins = state.performerCheckins || {};
+
   if (seed.characters.length > 0) state.characters = reorderCharacters(seed.characters);
   // Merge seed-defined composedOf/freeCombo into Supabase scenes (so o19/o31 etc. get correct structure)
   if (seed.scenes.length > 0) state.scenes = mergeNewSeedScenes(seed.scenes).sort((a, b) => (a.sortIdx ?? 999) - (b.sortIdx ?? 999));
+
+  // Restore hand-entered SHARED fields the remote row lacks, then re-push so the cloud catches up.
+  // Admin-only: only the admin owns shared data, so only they self-heal it. Non-admins take remote
+  // as-is (never resurrect a stale local value the admin may have intentionally cleared).
+  if (currentUserIsAdmin && seed.scenes.length > 0) {
+    state.scenes.forEach(s => {
+      const loc = localSceneById[s.id];
+      if (!loc) return;
+      let restored = false;
+      if (!s.linkedChar && loc.linkedChar) { s.linkedChar = loc.linkedChar; restored = true; }
+      if (Array.isArray(loc.actors) && loc.actors.length) {
+        const have = new Set(s.actors || []);
+        loc.actors.forEach(a => { if (!have.has(a)) { (s.actors = s.actors || []).push(a); restored = true; } });
+      }
+      if (restored) queueScenePush(s.id);
+    });
+  }
+  // Restore per-actor character meta (team/availability/status/subName) the remote row lacks.
+  if (currentUserIsAdmin && seed.characters.length > 0) {
+    state.characters.forEach(c => {
+      const loc = localCharByName[c.name];
+      if (!loc || !loc.actorMeta) return;
+      let restored = false;
+      c.actorMeta = c.actorMeta || {};
+      Object.keys(loc.actorMeta).forEach(actor => {
+        const lm = loc.actorMeta[actor] || {};
+        const rm = c.actorMeta[actor] || {};
+        const filled = { ...rm };
+        ['team', 'availability', 'status', 'subName'].forEach(f => {
+          const rv = rm[f], lv = lm[f];
+          if ((rv === undefined || rv === null || rv === '') && lv !== undefined && lv !== null && lv !== '') {
+            filled[f] = lv; restored = true;
+          }
+        });
+        c.actorMeta[actor] = filled;
+      });
+      if (restored) queueCharacterPush(c.name);
+    });
+  }
   if (seed.performances.length > 0) {
     // Replace seed visits with Supabase seed, but preserve isWatched/entries from local
     const seedVisits = seed.performances.map(p => {
@@ -8174,6 +8297,31 @@ async function loadFromSupabase() {
     state.visits = [...seedVisits, ...userOnlyVisits];
   }
   state.performerCheckins = seed.performer_checkins || state.performerCheckins || {};
+  // Restore performer check-ins the remote lacks entirely (hand-entered, unsynced) + re-push.
+  // Admin-only self-heal (same rationale as scenes/characters above).
+  if (currentUserIsAdmin) {
+    Object.keys(localCheckins).forEach(actor => {
+      const lc = localCheckins[actor];
+      const rc = state.performerCheckins[actor];
+      if (lc && Object.keys(lc).length > 0 && (!rc || Object.keys(rc).length === 0)) {
+        state.performerCheckins[actor] = lc;
+        queueCheckinPush(actor);
+      }
+    });
+  }
+
+  // Hidden performers are shared globally. Supabase is authoritative; but if the shared
+  // list is empty while this (admin) browser still has local-only hides, migrate them up once.
+  {
+    const remoteHidden = seed.hiddenPerformers || [];
+    const localHidden = Array.isArray(state.hiddenPerformers) ? state.hiddenPerformers : [];
+    if (remoteHidden.length === 0 && localHidden.length > 0 && currentUserIsAdmin) {
+      state.hiddenPerformers = [...new Set(localHidden)];
+      state.hiddenPerformers.forEach(a => queueHiddenPush(a));
+    } else {
+      state.hiddenPerformers = remoteHidden;
+    }
+  }
 
   // Now merge user data from Supabase (overrides local where applicable)
   const userData = await fetchUserDataFromSupabase();
@@ -8292,6 +8440,7 @@ async function bootApp() {
           }));
         }
         state.performerCheckins = seed.performer_checkins || {};
+        state.hiddenPerformers = seed.hiddenPerformers || [];
         saveState();
       }
     } catch (err) {
