@@ -344,6 +344,16 @@ body.app-loading::after { content: '동기화 중 · Loading…'; position: fixe
 .pool-actor-row select { background: var(--paper); border: 1px solid var(--rule); color: var(--ink); font-family: var(--mono); font-size: 10px; padding: 3px 6px; flex: 1; min-width: 70px; }
 .pool-actor-row .pa-remove { background: none; border: none; color: var(--ink-faint); cursor: pointer; font-size: 16px; padding: 0 6px; line-height: 1; flex: 0 0 auto; }
 .pool-actor-row .pa-remove:hover { color: var(--blood-bright); }
+.pool-actor-row .pa-hist-btn { background: var(--paper); border: 1px solid var(--rule); color: var(--gold); font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em; padding: 3px 8px; cursor: pointer; flex: 0 0 auto; }
+.pool-actor-row .pa-hist-btn:hover { border-color: var(--gold); }
+/* 등급 이력 편집 모달 */
+.hs-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.hs-row input[type="date"] { font-family: var(--mono); font-size: 12px; padding: 6px 8px; background: var(--paper); border: 1px solid var(--rule); color: var(--ink); flex: 1; min-width: 130px; }
+.hs-row select { font-family: var(--mono); font-size: 12px; padding: 6px 8px; background: var(--paper); border: 1px solid var(--rule); color: var(--ink); }
+.hs-row .hs-base { flex: 1; font-family: var(--mono); font-size: 11px; color: var(--ink-faint); letter-spacing: 0.06em; padding: 6px 8px; border: 1px dashed var(--rule); text-align: center; }
+.hs-row .hs-del { background: none; border: none; color: var(--ink-faint); cursor: pointer; font-size: 16px; line-height: 1; padding: 0 6px; }
+.hs-row .hs-del:hover { color: var(--blood-bright); }
+.hs-empty { color: var(--ink-faint); font-style: italic; font-size: 13px; text-align: center; padding: 16px 0; }
 
 /* ADD UI WITH MODE TOGGLE */
 .add-mode-toggle { display: flex; gap: 0; margin-top: 12px; margin-bottom: 6px; border: 1px solid var(--rule); width: fit-content; }
@@ -2035,6 +2045,190 @@ function recordStatusChange(meta, newStatus, fromDate) {
   else log.push({ from, status: newStatus || '' });
   log.sort((a, b) => normalizeDateStr(a.from).localeCompare(normalizeDateStr(b.from)));
   return log;
+}
+
+// 오늘 날짜 YYYY-MM-DD (로컬 기준)
+function todayIso() {
+  const t = new Date();
+  return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
+}
+
+// 등급 변경 시 '적용 시작일'을 달력(date picker)으로 고르는 다이얼로그. resolves 'YYYY-MM-DD' | null(취소)
+function askEffectiveDate(defaultIso, opts) {
+  opts = opts || {};
+  return new Promise(resolve => {
+    const back = document.createElement('div');
+    back.className = 'modal-backdrop open';
+    back.style.zIndex = '450';
+    const toLabel = opts.to === '' ? '등급 없음' : (opts.to || '');
+    const ctx = opts.actor
+      ? `<div class="modal-sub">${escapeHtml(opts.actor)}${opts.char ? ' · ' + escapeHtml(opts.char) : ''}${opts.to !== undefined ? ` → <strong style="color:var(--gold);">${escapeHtml(toLabel)}</strong>` : ''}</div>`
+      : '';
+    back.innerHTML = `
+      <div class="modal" style="max-width:420px; text-align:center;">
+        <h3 style="margin-bottom:6px;">등급 변경 적용 시작일</h3>
+        ${ctx}
+        <div style="font-size:13px; color:var(--ink-dim); margin:10px 0 14px; line-height:1.6;">이 날짜부터의 회차에 새 등급이 반영됩니다.<br>이전 회차는 기존 등급을 유지합니다.</div>
+        <input type="date" id="aedDate" value="${escapeHtml(defaultIso || '')}" style="font-family:var(--mono); font-size:15px; padding:10px 14px; background:var(--paper); border:1px solid var(--rule); color:var(--ink); text-align:center;">
+        <div style="display:flex; gap:10px; justify-content:center; margin-top:18px;">
+          <button type="button" class="btn ghost" style="width:auto; padding:12px 22px;" data-aed="cancel">취소</button>
+          <button type="button" class="btn" style="width:auto; padding:12px 28px;" data-aed="ok">적용</button>
+        </div>
+        <div style="margin-top:12px; font-size:11px; color:var(--ink-faint); font-style:italic;">창 바깥 클릭 또는 ESC = 취소</div>
+      </div>`;
+    document.body.appendChild(back);
+    const inp = back.querySelector('#aedDate');
+    setTimeout(() => { try { inp.focus(); } catch (e) {} }, 30);
+    let done = false;
+    function finish(val) {
+      if (done) return; done = true;
+      document.removeEventListener('keydown', onKey);
+      back.remove();
+      resolve(val);
+    }
+    function ok() { const v = inp.value; finish(v ? normalizeDateStr(v) : null); }
+    function onKey(e) {
+      if (e.key === 'Escape') finish(null);
+      else if (e.key === 'Enter') ok();
+    }
+    back.addEventListener('click', (e) => { if (e.target === back) finish(null); });
+    back.querySelector('[data-aed="cancel"]').addEventListener('click', () => finish(null));
+    back.querySelector('[data-aed="ok"]').addEventListener('click', ok);
+    document.addEventListener('keydown', onKey);
+  });
+}
+
+// 배우의 등급(Regular/Swing) 시기별 이력을 통째로 보고 수정하는 편집기.
+// statusLog = [{from:'YYYY-MM-DD', status}] (오름차순). '0000-01-01' 항목은 '맨 처음' 기준선.
+function manageStatusHistory(charName, actorName) {
+  if (guardGuest()) return;
+  const c = getCharacterByName(charName);
+  if (!c) return;
+  if (!c.actorMeta) c.actorMeta = {};
+  if (!c.actorMeta[actorName]) c.actorMeta[actorName] = {};
+  const meta = c.actorMeta[actorName];
+  // 작업용 복사본 (저장 눌러야 반영)
+  let work = (Array.isArray(meta.statusLog) ? meta.statusLog : [])
+    .map(e => ({ from: normalizeDateStr(e.from), status: e.status || '' }));
+  work.sort((a, b) => a.from.localeCompare(b.from));
+  // '맨 처음' 기준선(0000-01-01)을 항상 유지: 이게 없으면 첫 전환일 이전 회차가
+  // statusForDate의 폴백으로 '가장 최근 등급'을 잘못 물려받는다. 없으면 가장 이른 등급으로 시드
+  // (기존 단일항목 로그의 동작을 그대로 보존 — 폴백값과 동일).
+  if (work.length === 0 || work[0].from !== '0000-01-01') {
+    work.unshift({ from: '0000-01-01', status: work.length ? work[0].status : (meta.status || '') });
+  }
+
+  const back = document.createElement('div');
+  back.className = 'modal-backdrop open';
+  back.style.zIndex = '450';
+  back.innerHTML = `
+    <div class="modal" style="max-width:480px;">
+      <h3 style="margin-bottom:4px;">등급 이력 · ${escapeHtml(actorName)}</h3>
+      <div class="modal-sub">${escapeHtml(charName)} · 언제부터 어떤 등급인지 구간별로 지정</div>
+      <div id="hsBody" style="margin:16px 0; max-height:50vh; overflow:auto;"></div>
+      <button type="button" class="btn ghost" data-hs-add style="width:auto; padding:9px 16px; font-size:12px;">＋ 전환 추가</button>
+      <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:18px;">
+        <button type="button" class="btn ghost" style="width:auto; padding:11px 22px;" data-hs-cancel>취소</button>
+        <button type="button" class="btn" style="width:auto; padding:11px 28px;" data-hs-save>저장</button>
+      </div>
+      <div style="margin-top:12px; font-size:11px; color:var(--ink-faint); font-style:italic; line-height:1.6;">각 구간은 "그 날짜부터 다음 전환 전까지"의 등급입니다. 창 바깥 클릭 또는 ESC = 취소</div>
+    </div>`;
+  document.body.appendChild(back);
+  const bodyEl = back.querySelector('#hsBody');
+
+  const statusOpts = (sel) => `
+    <option value="" ${sel === '' ? 'selected' : ''}>등급 없음</option>
+    <option value="Regular" ${sel === 'Regular' ? 'selected' : ''}>Regular</option>
+    <option value="Swing" ${sel === 'Swing' ? 'selected' : ''}>Swing</option>`;
+
+  function rowHtml(e, i) {
+    const isBase = e.from === '0000-01-01';
+    const dateCell = isBase
+      ? `<span class="hs-base" title="첫 전환 이전의 모든 회차 (삭제 불가)">맨 처음부터</span>`
+      : `<input type="date" value="${escapeHtml(e.from)}" data-hs-date="${i}">`;
+    // 기준선은 삭제 버튼 없음 — 지우면 첫 전환 이전 회차의 등급 구분이 무너진다.
+    const delCell = isBase
+      ? `<span style="width:28px; flex:0 0 auto;"></span>`
+      : `<button type="button" class="hs-del" data-hs-del="${i}" title="이 구간 삭제">×</button>`;
+    return `<div class="hs-row" data-hs-i="${i}">
+      ${dateCell}
+      <span style="color:var(--ink-faint); font-family:var(--mono); font-size:12px;">→</span>
+      <select data-hs-status="${i}">${statusOpts(e.status)}</select>
+      ${delCell}
+    </div>`;
+  }
+  function syncFromDom() {
+    bodyEl.querySelectorAll('.hs-row').forEach(row => {
+      const i = parseInt(row.dataset.hsI);
+      if (isNaN(i) || !work[i]) return;
+      const d = row.querySelector('[data-hs-date]');
+      if (d && d.value) work[i].from = normalizeDateStr(d.value);
+      const s = row.querySelector('[data-hs-status]');
+      if (s) work[i].status = s.value;
+    });
+  }
+  function render() {
+    bodyEl.innerHTML = work.length
+      ? work.map(rowHtml).join('')
+      : `<div class="hs-empty">등록된 등급 이력이 없습니다.<br>아래 "전환 추가"로 언제부터 어떤 등급인지 지정하세요.</div>`;
+    bodyEl.querySelectorAll('[data-hs-del]').forEach(btn => {
+      btn.addEventListener('click', () => { syncFromDom(); work.splice(parseInt(btn.dataset.hsDel), 1); render(); });
+    });
+  }
+  render();
+
+  let done = false;
+  function close() {
+    if (done) return; done = true;
+    document.removeEventListener('keydown', onKey);
+    back.remove();
+  }
+  function onKey(e) { if (e.key === 'Escape') close(); }
+  back.addEventListener('click', (e) => { if (e.target === back) close(); });
+  back.querySelector('[data-hs-cancel]').addEventListener('click', close);
+  back.querySelector('[data-hs-add]').addEventListener('click', () => {
+    syncFromDom();
+    work.push({ from: todayIso(), status: '' });
+    work.sort((a, b) => a.from.localeCompare(b.from));
+    render();
+  });
+  back.querySelector('[data-hs-save]').addEventListener('click', () => {
+    syncFromDom();
+    for (const e of work) {
+      if (e.from !== '0000-01-01' && !/^\d{4}-\d{2}-\d{2}$/.test(e.from)) {
+        showToast('날짜 형식 오류 (YYYY-MM-DD)'); return;
+      }
+    }
+    // 같은 날짜는 마지막 값으로 병합, 오름차순 정렬
+    const map = new Map();
+    work.forEach(e => map.set(e.from, e.status || ''));
+    let cleaned = [...map.entries()]
+      .map(([from, status]) => ({ from, status }))
+      .sort((a, b) => a.from.localeCompare(b.from));
+    // 직전 구간과 등급이 같은 전환은 무의미하므로 접어서 제거 (예: Regular→Regular)
+    cleaned = cleaned.filter((e, i) => i === 0 || e.status !== cleaned[i - 1].status);
+    const newestStatus = cleaned.length ? cleaned[cleaned.length - 1].status : '';
+    // 기준선(0000-01-01) 하나만 남으면 로그는 불필요 — 현재 등급값만으로 동일하게 동작하므로 정리
+    if (cleaned.length <= 1) {
+      delete meta.statusLog;
+      if (newestStatus) meta.status = newestStatus; else delete meta.status;
+    } else {
+      meta.statusLog = cleaned;
+      if (newestStatus) meta.status = newestStatus; else delete meta.status;  // 현재 등급 = 가장 최근 전환값
+    }
+    const scalarKeys = Object.keys(meta).filter(k => k !== 'statusLog');
+    if (scalarKeys.length === 0 && !(Array.isArray(meta.statusLog) && meta.statusLog.length)) {
+      delete c.actorMeta[actorName];
+    }
+    saveState();
+    queueCharacterPush(c.name, true);
+    close();
+    renderPoolEditor();
+    if (typeof renderHistory === 'function') renderHistory();
+    if (typeof renderStats === 'function') renderStats();
+    showToast('등급 이력 저장됨');
+  });
+  document.addEventListener('keydown', onKey);
 }
 
 // Sort a character's actors for casting UI:
@@ -5427,6 +5621,7 @@ function renderPoolEditor() {
                     <option value="" ${!m.availability || m.availability === 'Active' ? 'selected' : ''}>Active</option>
                     <option value="Checked Out" ${m.availability === 'Checked Out' ? 'selected' : ''}>Checked Out</option>
                   </select>
+                  <button type="button" class="pa-hist-btn" data-hist-actor="${escapeHtml(a)}" title="등급 시기별 이력 보기·수정">이력${(() => { const n = (m.statusLog || []).filter(e => e.from !== '0000-01-01').length; return n ? ` ·${n}` : ''; })()}</button>
                 </div>
               </div>
             `;
@@ -5472,26 +5667,24 @@ function renderPoolEditor() {
     if (!c.actorMeta) c.actorMeta = {};
 
     $$('input[data-meta-field], select[data-meta-field]', card).forEach(el => {
-      el.addEventListener('change', () => {
+      el.addEventListener('change', async () => {
         const actor = el.dataset.actor;
         const field = el.dataset.metaField;
         const val = el.value.trim();
         if (!c.actorMeta[actor]) c.actorMeta[actor] = {};
         const meta = c.actorMeta[actor];
+        let needsRerender = false;
 
         if (field === 'status') {
           // Grade change is effective-dated: past records keep their old grade, only records
-          // on/after the chosen date get the new one. Prompt for the effective date.
+          // on/after the chosen date get the new one. Pick the effective date on a calendar.
           const prev = meta.status || '';
           if (val === prev) return;                       // no real change
-          const t = new Date();
-          const iso = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
-          const input = prompt('등급 변경 적용 시작일 (이 날짜부터의 회차에 반영)\n비우거나 취소하면 변경 취소', iso);
-          if (input === null || input.trim() === '') {    // cancel/empty → abort, revert dropdown
+          const from = await askEffectiveDate(todayIso(), { actor, char: c.name, to: val });
+          if (!from) {                                    // cancel → abort, revert dropdown
             el.value = prev;
             return;
           }
-          const from = normalizeDateStr(input.trim());
           if (!/^\d{4}-\d{2}-\d{2}$/.test(from)) {         // invalid format → abort, revert
             showToast('날짜 형식 오류 (YYYY-MM-DD) — 변경 취소');
             el.value = prev;
@@ -5499,6 +5692,7 @@ function renderPoolEditor() {
           }
           recordStatusChange(meta, val, from);            // seed baseline + upsert log entry
           if (val) meta.status = val; else delete meta.status;  // current value tracks newest edit
+          needsRerender = true;                           // 이력 버튼 카운트 갱신
         } else {
           if (val) meta[field] = val;
           else delete meta[field];
@@ -5512,7 +5706,13 @@ function renderPoolEditor() {
         saveState();
         queueCharacterPush(c.name, true); // explicit edit → local value wins
         showToast('저장됨');
+        if (needsRerender) { renderPoolEditor(); if (typeof renderHistory === 'function') renderHistory(); if (typeof renderStats === 'function') renderStats(); }
       });
+    });
+
+    // 등급 이력 편집 버튼 (달력 + 구간별 수정)
+    $$('button[data-hist-actor]', card).forEach(btn => {
+      btn.addEventListener('click', () => manageStatusHistory(c.name, btn.dataset.histActor));
     });
 
     const aliasEl = $('input[data-alias-input]', card);
