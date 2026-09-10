@@ -937,6 +937,9 @@ body.app-loading::after { content: '동기화 중 · Loading…'; position: fixe
     <div class="section-rule"><div class="line"></div><div class="ornament">✦</div><div class="line"></div></div>
     <div class="history-controls">
       <input type="text" id="interactionSearch" placeholder="배역명 또는 퍼포머 검색…" style="flex: 1; min-width: 240px;">
+      <select id="interactionActor" title="배우별 필터 — 그 배우와의 인카운터만">
+        <option value="">전체 배우</option>
+      </select>
       <select id="interactionType">
         <option value="all">전체 유형</option>
         <option value="1:1">1:1</option>
@@ -5294,6 +5297,17 @@ function renderInteractions() {
   const filterType = $('#interactionType').value;
   const excludeLegacy = $('#interactionExcludeLegacy').checked;
 
+  // 배우별 필터 드롭다운 채우기 (현재 선택값 보존 — 렌더가 여러 번 불려도 유지)
+  const actorSel = $('#interactionActor');
+  const actorFilter = actorSel ? actorSel.value : '';
+  if (actorSel) {
+    const cur = actorSel.value;
+    const opts = '<option value="">전체 배우</option>' +
+      getAllActors().map(a => `<option value="${escapeHtml(a)}">${escapeHtml(a)}</option>`).join('');
+    actorSel.innerHTML = opts;
+    if (cur && [...actorSel.options].some(o => o.value === cur)) actorSel.value = cur;
+  }
+
   // Collect all entries from watched visits
   // Structure: sceneId -> { scene, occurrences: [{date, matinee, perfNum, actor, isLegacy}] }
   const numMap = getVisitNumMap();
@@ -5323,6 +5337,8 @@ function renderInteractions() {
     const data = sceneMap[s.id];
     let occurrences = data ? [...data.occurrences] : [];
     if (excludeLegacy) occurrences = occurrences.filter(o => !o.isLegacy);
+    // 배우별 필터: 그 배우가 낀 인카운터 항목만 남긴다 (조합 "A X B"도 castingActors로 분해해 정확히 매칭).
+    if (actorFilter) occurrences = occurrences.filter(o => castingActors(o.actor).includes(actorFilter));
     if (occurrences.length === 0) return;
     if (term && !s.role.toLowerCase().includes(term) &&
         !occurrences.some(o => o.actor.toLowerCase().includes(term))) return;
@@ -5335,6 +5351,28 @@ function renderInteractions() {
   });
 
   const TYPE_LABELS = { '1:1': '1:1 원온원', '인터랙션': '인터랙션', '워크아웃': '워크아웃' };
+
+  // 배우 선택 시 상단 요약 배너: {배우} — 1:1 ×N · 인터랙션 ×N · 워크아웃 ×N · 총 ×N
+  let summaryHtml = '';
+  if (actorFilter) {
+    const byType = {};
+    let grand = 0;
+    TYPE_ORDER.forEach(t => {
+      const n = groups[t].reduce((s, x) => s + x.occurrences.length, 0);
+      byType[t] = n; grand += n;
+    });
+    const dot = getActorDotHtml(actorFilter);
+    const parts = TYPE_ORDER.map(t => `<span style="white-space:nowrap;">${TYPE_LABELS[t]} <span style="color:var(--gold);">×${byType[t]}</span></span>`).join(' · ');
+    summaryHtml = `
+      <div style="background:var(--paper-raised); border:1px solid var(--rule); padding:14px 16px; margin-bottom:16px;">
+        <div style="display:flex; align-items:baseline; gap:8px; flex-wrap:wrap; margin-bottom:8px;">
+          <span style="font-family:var(--serif-display); font-size:18px; font-style:italic;">${dot}${escapeHtml(actorFilter)}</span>
+          <span style="font-family:var(--mono); font-size:11px; color:var(--ink-faint); letter-spacing:0.1em;">나와의 인카운터</span>
+          <span style="margin-left:auto; font-family:var(--mono); font-size:12px; color:var(--gold);">총 ×${grand}</span>
+        </div>
+        <div style="display:flex; gap:14px; flex-wrap:wrap; font-family:var(--mono); font-size:12px; color:var(--ink-dim);">${parts}</div>
+      </div>`;
+  }
 
   let html = '';
   TYPE_ORDER.forEach(type => {
@@ -5378,8 +5416,8 @@ function renderInteractions() {
     `;
   });
 
-  if (!html.trim()) html = '<div style="padding:40px;text-align:center;color:var(--ink-faint);font-style:italic;">기록된 인터랙션이 없습니다</div>';
-  $('#interactionsList').innerHTML = html;
+  if (!html.trim()) html = `<div style="padding:40px;text-align:center;color:var(--ink-faint);font-style:italic;">${actorFilter ? escapeHtml(actorFilter) + '와의 기록된 인터랙션이 없습니다' : '기록된 인터랙션이 없습니다'}</div>`;
+  $('#interactionsList').innerHTML = summaryHtml + html;
 
   $$('.ix-card').forEach(card => {
     card.addEventListener('click', () => openRoleModal(card.dataset.scene));
@@ -5387,6 +5425,7 @@ function renderInteractions() {
 }
 
 $('#interactionSearch').addEventListener('input', debounce(renderInteractions, 180));
+$('#interactionActor') && $('#interactionActor').addEventListener('change', renderInteractions);
 $('#interactionType').addEventListener('change', renderInteractions);
 $('#interactionExcludeLegacy').addEventListener('change', renderInteractions);
 
