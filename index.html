@@ -1626,6 +1626,7 @@ function loadState() {
       if (!s.actorTags) s.actorTags = {};
       if (!s.performerCheckins) s.performerCheckins = {};
       if (!Array.isArray(s.hiddenPerformers)) s.hiddenPerformers = [];
+      if (!Array.isArray(s.manualPerformers)) s.manualPerformers = [];
       if (!s.characters) s.characters = defaultCharacters();
       else s.characters = reorderCharacters(s.characters);
       if (!s.scenes) s.scenes = defaultScenes();
@@ -1650,6 +1651,7 @@ function loadState() {
         old.actorTags = old.actorTags || {};
         old.performerCheckins = old.performerCheckins || {};
         old.hiddenPerformers = Array.isArray(old.hiddenPerformers) ? old.hiddenPerformers : [];
+        old.manualPerformers = Array.isArray(old.manualPerformers) ? old.manualPerformers : [];
         old.characters = old.characters ? reorderCharacters(old.characters) : defaultCharacters();
         if (!old.scenes || !Array.isArray(old.scenes)) {
           old.scenes = defaultScenes();
@@ -1688,6 +1690,7 @@ function loadState() {
     actorTags: {},
     watchlist: [],
     hiddenPerformers: [],
+    manualPerformers: [],
     characters: defaultCharacters(),
     scenes: defaultScenes(),
     performerCheckins: {}
@@ -1814,6 +1817,7 @@ let state = loadState();
 if (!state.actorTags) state.actorTags = {};
 if (!state.performerCheckins) state.performerCheckins = {};
 if (!Array.isArray(state.hiddenPerformers)) state.hiddenPerformers = [];
+if (!Array.isArray(state.manualPerformers)) state.manualPerformers = [];
 if (!state.characters) state.characters = defaultCharacters();
 if (!state.scenes) state.scenes = defaultScenes();
 if (!state.aliasShow) state.aliasShow = { casting: true, roles: true, record: true }; // 탭별 별칭 표시 토글(기본 켜짐)
@@ -1974,6 +1978,8 @@ function getAllActors() {
       castingActors(a).forEach(p => set.add(p));
     });
   });
+  // 수동 등록 배우: 풀·장면·기록 어디에도 없어도 명단에 유지 (숨김→복원 시 사라지던 문제 해결)
+  (state.manualPerformers || []).forEach(a => { if (a) set.add(a); });
   const hidden = new Set(state.hiddenPerformers || []);
   return sortActorList([...set].filter(a => !hidden.has(a)));
 }
@@ -2001,6 +2007,55 @@ function unhidePerformer(actor) {
   if (i >= 0) state.hiddenPerformers.splice(i, 1);
   saveState();
   queueHiddenPush(actor);
+}
+
+// 수동 등록 배우: 풀·장면·기록 어디에도 없어도 명단에 유지되는 배우. hidden과 대칭(전역 공유·admin만).
+function queueManualPerformerPush(actor) {
+  if (!sb || !currentUserIsAdmin) return;
+  adminPushQueue.manualPerformers.add(actor);
+  persistPushQueue();
+  schedulePush();
+}
+function addManualPerformer(actor) {
+  actor = (actor || '').trim();
+  if (!actor) { showToast('배우명을 입력하세요'); return false; }
+  if (!currentUserIsAdmin) return false; // shared/global — admin only
+  if (!Array.isArray(state.manualPerformers)) state.manualPerformers = [];
+  // 이미 어디든(풀/기록/수동) 존재하면 중복 등록 불필요 — 단, 숨김 상태면 복원해서 보이게.
+  const wasHidden = (state.hiddenPerformers || []).includes(actor);
+  if (wasHidden) {
+    const i = state.hiddenPerformers.indexOf(actor);
+    if (i >= 0) state.hiddenPerformers.splice(i, 1);
+    queueHiddenPush(actor);
+  }
+  if (!state.manualPerformers.includes(actor)) {
+    state.manualPerformers.push(actor);
+    queueManualPerformerPush(actor);
+  } else if (!wasHidden) {
+    showToast('이미 등록된 배우'); return false;
+  }
+  saveState();
+  return true;
+}
+function removeManualPerformer(actor) {
+  if (!currentUserIsAdmin) return; // shared/global — admin only
+  if (!Array.isArray(state.manualPerformers)) { state.manualPerformers = []; return; }
+  const i = state.manualPerformers.indexOf(actor);
+  if (i >= 0) state.manualPerformers.splice(i, 1);
+  saveState();
+  queueManualPerformerPush(actor);
+}
+// 이 배우가 오직 manualPerformers 때문에 명단에 있는지(=풀/장면/기록 어디에도 없음) 판정. UI 배지·제거버튼 노출용.
+function isManualOnlyPerformer(actor) {
+  if (!(state.manualPerformers || []).includes(actor)) return false;
+  const inChar = state.characters.some(c => (c.actors || []).includes(actor));
+  if (inChar) return false;
+  const inScene = state.scenes.some(s => (s.actors || []).some(a => splitActorString(a).includes(actor)));
+  if (inScene) return false;
+  const inVisit = state.visits.some(v =>
+    (v.entries || []).some(e => splitActorString(e.actor).includes(actor)) ||
+    Object.values(v.casting || {}).some(a => castingActors(a).includes(actor)));
+  return !inVisit;
 }
 
 function getActorMeta(charName, actorName) {
@@ -2539,13 +2594,19 @@ function addSelectedScene(sceneId) {
   if (selectedScenes.some(s => s.sceneId === sceneId)) { showToast('이미 추가된 장면'); return; }
   const scene = getSceneById(sceneId);
   if (!scene) return;
+  // 인카운터를 추가하면, 목록 최상단 배우가 아니라 '지금 선택된 회차에 그 배역으로 캐스팅된 배우'를
+  // 기본값으로 채운다. currentCasting = record 탭에서 로드된 회차의 캐스팅.
+  const visitForAuto = { casting: currentCasting || {} };
   if (isFreeComboScene(scene)) {
     const pool = getFreeComboPool(scene);
     const slots = scene.freeCombo.slots || 2;
     const initial = Array.from({ length: slots }, () => pool[0] || '');
     selectedScenes.push({ sceneId, freeComboActors: initial });
   } else if (isComposedScene(scene)) {
+    // 각 구성 배역마다 이 회차의 캐스팅 배우를 우선 채우고, 없으면 그 배역 풀의 첫 배우로 폴백.
     const componentActors = scene.composedOf.map(charName => {
+      const cast = (currentCasting && currentCasting[charName]) ? currentCasting[charName] : '';
+      if (cast) return cast;
       const pool = getComponentActorPool(charName);
       return pool.length > 0 ? pool[0] : '';
     });
@@ -2556,7 +2617,9 @@ function addSelectedScene(sceneId) {
       showToast('이 장면에는 배우가 없어요. 캐스팅 풀에서 배우를 추가하세요.');
       return;
     }
-    selectedScenes.push({ sceneId, actor: pool[0] });
+    // 이 회차 캐스팅에서 이 장면 배역의 배우를 자동 결정. 못 찾으면(캐스팅 미입력 등) 풀 첫 배우로 폴백.
+    const auto = autoActorForScene(scene, visitForAuto);
+    selectedScenes.push({ sceneId, actor: (auto && pool.includes(auto)) ? auto : (auto || pool[0]) });
   }
   renderSelected();
 }
@@ -6335,10 +6398,22 @@ function renderPerformers() {
 
   const wrap = $('#performersList');
   const hiddenList = state.hiddenPerformers || [];
-  const hiddenBanner = (currentUserIsAdmin && hiddenList.length) ? `
-    <div style="grid-column:1/-1; padding:10px 14px; background:var(--paper-raised); border:1px solid var(--rule); display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-bottom:4px;">
-      <span style="font-family:var(--mono); font-size:10px; letter-spacing:0.18em; color:var(--gold); text-transform:uppercase;">숨긴 배우 ${hiddenList.length}명</span>
-      ${hiddenList.map(a => `<span style="display:inline-flex; align-items:center; gap:5px; background:var(--paper-deep); border:1px solid var(--rule); padding:3px 8px; font-size:12px; color:var(--ink-dim);">${escapeHtml(a)}<button type="button" data-unhide-perf="${escapeHtml(a)}" title="복원" style="background:transparent; border:none; color:var(--gold); cursor:pointer; font-size:14px; line-height:1; padding:0;">↺</button></span>`).join('')}
+  // 관리자 배너: 배우 직접 추가 입력 + 숨긴 배우 목록. (풀·기록에 없는 배우도 명단에 등록·유지 가능)
+  const addRow = currentUserIsAdmin ? `
+      <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+        <span style="font-family:var(--mono); font-size:10px; letter-spacing:0.18em; color:var(--gold); text-transform:uppercase;">배우 직접 추가</span>
+        <input type="text" id="manualPerfInput" placeholder="배우명 입력 후 Enter" style="background:var(--paper); border:1px solid var(--rule); color:var(--ink); font-family:var(--serif-body); font-size:13px; padding:4px 8px; min-width:180px;">
+        <button type="button" id="manualPerfAdd" style="background:transparent; border:1px solid var(--gold-dim); color:var(--gold); font-family:var(--mono); font-size:10px; letter-spacing:0.1em; padding:4px 12px; cursor:pointer;">추가</button>
+        <span style="font-size:11px; color:var(--ink-faint); font-style:italic;">풀·기록에 없어도 명단에 유지됩니다</span>
+      </div>` : '';
+  const hiddenRow = (currentUserIsAdmin && hiddenList.length) ? `
+      <div style="display:flex; flex-wrap:wrap; align-items:center; gap:8px; ${''}">
+        <span style="font-family:var(--mono); font-size:10px; letter-spacing:0.18em; color:var(--gold); text-transform:uppercase;">숨긴 배우 ${hiddenList.length}명</span>
+        ${hiddenList.map(a => `<span style="display:inline-flex; align-items:center; gap:5px; background:var(--paper-deep); border:1px solid var(--rule); padding:3px 8px; font-size:12px; color:var(--ink-dim);">${escapeHtml(a)}<button type="button" data-unhide-perf="${escapeHtml(a)}" title="복원" style="background:transparent; border:none; color:var(--gold); cursor:pointer; font-size:14px; line-height:1; padding:0;">↺</button></span>`).join('')}
+      </div>` : '';
+  const hiddenBanner = (addRow || hiddenRow) ? `
+    <div style="grid-column:1/-1; padding:10px 14px; background:var(--paper-raised); border:1px solid var(--rule); display:flex; flex-direction:column; gap:10px; margin-bottom:4px;">
+      ${addRow}${hiddenRow}
     </div>` : '';
   function wireHiddenControls() {
     $$('[data-unhide-perf]').forEach(btn => btn.addEventListener('click', () => {
@@ -6347,6 +6422,18 @@ function renderPerformers() {
     $$('[data-hide-perf]').forEach(btn => btn.addEventListener('click', () => {
       const actor = btn.dataset.hidePerf; hidePerformer(actor); showToast(`${actor} 숨김 (복원 가능)`); renderPerformers();
     }));
+    $$('[data-remove-manual]').forEach(btn => btn.addEventListener('click', () => {
+      const actor = btn.dataset.removeManual;
+      if (!confirm(`'${actor}'를 명단에서 제거할까요?\n(이 배우는 풀·기록에 없어 제거하면 목록에서 사라집니다)`)) return;
+      removeManualPerformer(actor); showToast(`${actor} 제거됨`); renderPerformers();
+    }));
+    const addBtn = $('#manualPerfAdd'), inp = $('#manualPerfInput');
+    function doAdd() {
+      const name = (inp?.value || '').trim();
+      if (addManualPerformer(name)) { showToast(`${name} 추가됨`); renderPerformers(); }
+    }
+    if (addBtn) addBtn.addEventListener('click', doAdd);
+    if (inp) inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); doAdd(); } });
   }
   if (actors.length === 0) {
     wrap.innerHTML = hiddenBanner + '<div style="padding: 40px; text-align: center; color: var(--ink-faint); font-style: italic; grid-column: 1 / -1;">결과 없음</div>';
@@ -6375,17 +6462,20 @@ function renderPerformers() {
     const roles = actorRoles[a] || [];
     const tag = state.actorTags[a];
     const dotHtml = tag ? `<span class="color-dot" style="display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: ${COLOR_VARS[tag]}; margin-right: 4px; vertical-align: middle;"></span>` : '';
+    const manualOnly = isManualOnlyPerformer(a);
+    const manualBadge = manualOnly ? `<span style="font-family:var(--mono); font-size:8px; letter-spacing:0.12em; color:var(--gold); border:1px solid var(--gold-dim); border-radius:2px; padding:1px 5px; margin-left:6px; vertical-align:middle;">수동</span>` : '';
 
     return `
       <div class="pool-card" data-perf-actor="${escapeHtml(a)}">
         <div style="display: flex; justify-content: space-between; align-items: baseline; gap: 8px;">
-          <div class="pool-char-name">${dotHtml}${escapeHtml(a)}</div>
+          <div class="pool-char-name">${dotHtml}${escapeHtml(a)}${manualBadge}</div>
           <div style="display:flex; align-items:center; gap:8px; flex:none;">
             <span style="font-family: var(--mono); font-size: 10px; letter-spacing: 0.15em;">${statusLabel}</span>
+            ${currentUserIsAdmin && manualOnly ? `<button type="button" data-remove-manual="${escapeHtml(a)}" title="명단에서 제거 (풀·기록에 없는 수동 등록 배우)" style="background:transparent; border:1px solid var(--rule); color:var(--ink-faint); font-family:var(--mono); font-size:9px; letter-spacing:0.1em; padding:2px 7px; cursor:pointer; white-space:nowrap;">제거</button>` : ''}
             ${currentUserIsAdmin ? `<button type="button" data-hide-perf="${escapeHtml(a)}" title="목록에서 숨김 (기록·통계는 보존)" style="background:transparent; border:1px solid var(--rule); color:var(--ink-faint); font-family:var(--mono); font-size:9px; letter-spacing:0.1em; padding:2px 7px; cursor:pointer; white-space:nowrap;">숨김</button>` : ''}
           </div>
         </div>
-        <div class="pool-char-meta">${roles.length > 0 ? '배역: ' + roles.slice(0, 4).map(r => escapeHtml(r)).join(', ') + (roles.length > 4 ? ` +${roles.length - 4}` : '') : '풀에 없음'}</div>
+        <div class="pool-char-meta">${roles.length > 0 ? '배역: ' + roles.slice(0, 4).map(r => escapeHtml(r)).join(', ') + (roles.length > 4 ? ` +${roles.length - 4}` : '') : (manualOnly ? '수동 등록 (풀·기록 없음)' : '풀에 없음')}</div>
         ${currentUserIsAdmin ? `
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px;">
           <div class="field" style="margin: 0;"><label style="font-size: 9px;">체크인 · IN</label>
@@ -8252,12 +8342,13 @@ async function pushSeedToSupabase() {
 async function fetchSeedFromSupabase() {
   // Returns { characters, scenes, performances, performer_checkins } from Supabase
   if (!sb) return null;
-  const [chars, scenes, perfs, checkins, hidden, aliasProbe] = await Promise.all([
+  const [chars, scenes, perfs, checkins, hidden, manual, aliasProbe] = await Promise.all([
     sb.from('characters').select('*').order('sort_idx'),
     sb.from('scenes').select('*').order('sort_idx'),
     sb.from('performances').select('*').order('date'),
     sb.from('performer_checkins').select('*'),
     sb.from('hidden_performers').select('actor_name'),
+    sb.from('manual_performers').select('actor_name'),   // 테이블 없어도 {error}만 옴(전체 안 깨짐)
     sb.from('characters').select('aliases').limit(1)   // aliases 컬럼 존재 프로브 (없으면 error)
   ]);
   CHARACTERS_HAS_ALIASES = !aliasProbe.error;
@@ -8282,7 +8373,8 @@ async function fetchSeedFromSupabase() {
       acc[r.actor_name] = { checkIn: r.check_in, checkOut: r.check_out, status: r.status, notes: r.notes };
       return acc;
     }, {}),
-    hiddenPerformers: (hidden.data || []).map(r => r.actor_name)
+    hiddenPerformers: (hidden.data || []).map(r => r.actor_name),
+    manualPerformers: (manual.data || []).map(r => r.actor_name)
   };
 }
 
@@ -8344,7 +8436,8 @@ function persistPushQueue() {
         scenes: [...adminPushQueue.scenes],
         performances: [...adminPushQueue.performances],
         checkins: [...adminPushQueue.checkins],
-        hidden: [...adminPushQueue.hidden]
+        hidden: [...adminPushQueue.hidden],
+        manualPerformers: [...adminPushQueue.manualPerformers]
       },
       forceMeta: [...adminForceMetaChars]
     }));
@@ -8366,6 +8459,7 @@ function restorePushQueue() {
       (d.admin.performances || []).forEach(x => adminPushQueue.performances.add(x));
       (d.admin.checkins || []).forEach(x => adminPushQueue.checkins.add(x));
       (d.admin.hidden || []).forEach(x => adminPushQueue.hidden.add(x));
+      (d.admin.manualPerformers || []).forEach(x => adminPushQueue.manualPerformers.add(x));
     }
     (d.forceMeta || []).forEach(x => adminForceMetaChars.add(x));
   } catch (e) {}
@@ -8374,7 +8468,8 @@ function restorePushQueue() {
 function pendingPushCount() {
   return pushQueue.visitState.size + pushQueue.tags.size + pushQueue.watchlist.size + pushQueue.addedVisits.size +
     adminPushQueue.characters.size + adminPushQueue.scenes.size +
-    adminPushQueue.performances.size + adminPushQueue.checkins.size + adminPushQueue.hidden.size;
+    adminPushQueue.performances.size + adminPushQueue.checkins.size + adminPushQueue.hidden.size +
+    adminPushQueue.manualPerformers.size;
 }
 
 function updateSyncIndicator() {
@@ -8676,6 +8771,18 @@ async function _flushPushQueueInner() {
       if (!ok) hadError = true;
       if (ok) hidBatch.forEach(actor => adminPushQueue.hidden.delete(actor));
     }
+    if (adminPushQueue.manualPerformers.size > 0) {
+      const mpBatch = [...adminPushQueue.manualPerformers];
+      const manual = new Set(state.manualPerformers || []);
+      const rows = []; const deletes = [];
+      mpBatch.forEach(actor => {
+        if (manual.has(actor)) rows.push({ actor_name: actor });
+        else deletes.push(actor);
+      });
+      const ok = await flushTable('manual performers', 'manual_performers', rows, 'actor_name', 'actor_name', deletes, null);
+      if (!ok) hadError = true;
+      if (ok) mpBatch.forEach(actor => adminPushQueue.manualPerformers.delete(actor));
+    }
   }
   return hadError;
 }
@@ -8686,7 +8793,8 @@ const adminPushQueue = {
   scenes: new Set(),      // by id
   performances: new Set(),// by id
   checkins: new Set(),    // by actor_name
-  hidden: new Set()       // hidden performer actor_name (shared globally)
+  hidden: new Set(),      // hidden performer actor_name (shared globally)
+  manualPerformers: new Set() // manually-registered performer actor_name (shared globally)
 };
 // Characters whose actor_meta should be pushed AS-IS (no merge), because the user
 // explicitly edited team/availability/status and intends the local value to win —
@@ -8900,6 +9008,19 @@ async function loadFromSupabase() {
     }
   }
 
+  // Manual performers (풀·기록에 없어도 유지할 배우) — hidden과 동일한 shared/admin 규칙.
+  // 원격이 비어있고 로컬에만 있으면(테이블 미생성 포함) 로컬을 지키고 한 번 올려보낸다.
+  {
+    const remoteManual = seed.manualPerformers || [];
+    const localManual = Array.isArray(state.manualPerformers) ? state.manualPerformers : [];
+    if (remoteManual.length === 0 && localManual.length > 0 && currentUserIsAdmin) {
+      state.manualPerformers = [...new Set(localManual)];
+      state.manualPerformers.forEach(a => queueManualPerformerPush(a));
+    } else {
+      state.manualPerformers = remoteManual;
+    }
+  }
+
   // Now merge user data from Supabase (overrides local where applicable)
   const userData = await fetchUserDataFromSupabase();
   if (userData) {
@@ -9021,6 +9142,7 @@ async function bootApp() {
         }
         state.performerCheckins = seed.performer_checkins || {};
         state.hiddenPerformers = seed.hiddenPerformers || [];
+        state.manualPerformers = seed.manualPerformers || [];
         normalizeCastingKeys(state.visits);
         saveState();
       }
