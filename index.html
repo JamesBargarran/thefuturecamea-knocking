@@ -1999,6 +1999,44 @@ function getActorMeta(charName, actorName) {
   return c.actorMeta[actorName] || null;
 }
 
+// Resolve the grade (Regular/Swing) that was in effect for an actor on a given performance
+// date. Uses actorMeta[actor].statusLog (effective-dated history) when present; falls back to
+// the current .status for actors with no history (all legacy data — see backward-compat).
+// statusLog entries are { from: 'YYYY-MM-DD', status } sorted ascending by `from`.
+function statusForDate(charName, actorName, date) {
+  const meta = getActorMeta(charName, actorName);
+  if (!meta) return '';
+  const log = Array.isArray(meta.statusLog) ? meta.statusLog : null;
+  if (!log || log.length === 0) return meta.status || '';   // legacy: no history
+  const d = date ? normalizeDateStr(date) : '';
+  if (!d) return meta.status || '';                          // undated record → current value
+  let resolved = null;
+  for (const entry of log) {
+    if (normalizeDateStr(entry.from) <= d) resolved = entry; // pick last entry whose from <= d
+    else break;
+  }
+  if (!resolved) return meta.status || '';                   // date precedes all history → current
+  return resolved.status || '';                              // '' (등급 해제) respected → no badge
+}
+
+// Record a grade change into meta.statusLog with an effective date. Keeps the array sorted
+// ascending and de-duplicated by `from` (same-date re-edit replaces, never duplicates). On the
+// first edit, seeds a '0000-01-01' baseline of the PRIOR grade so records dated before `from`
+// keep the old value instead of leaking the new one via the fallback.
+function recordStatusChange(meta, newStatus, fromDate) {
+  const from = normalizeDateStr(fromDate);
+  if (!Array.isArray(meta.statusLog)) meta.statusLog = [];
+  const log = meta.statusLog;
+  if (log.length === 0 && (meta.status || '') !== (newStatus || '')) {
+    log.push({ from: '0000-01-01', status: meta.status || '' });
+  }
+  const existing = log.find(e => normalizeDateStr(e.from) === from);
+  if (existing) existing.status = newStatus || '';
+  else log.push({ from, status: newStatus || '' });
+  log.sort((a, b) => normalizeDateStr(a.from).localeCompare(normalizeDateStr(b.from)));
+  return log;
+}
+
 // Sort a character's actors for casting UI:
 // Regular (Pink→Blue→none) → Swing (by appearance count desc) → no-status → Checked Out/Retired last
 function sortActorsForCasting(charName, actors) {
@@ -2047,6 +2085,19 @@ function renderActorMetaInline(charName, actorName) {
   let html = '';
   if (meta.subName) html += `<span class="sub-name">${escapeHtml(meta.subName)}</span>`;
   if (meta.status) html += `<span class="status-badge ${statusBadgeClass(meta.status)}">${escapeHtml(meta.status)}</span>`;
+  return html;
+}
+
+// Same as renderActorMetaInline but resolves the grade as of `date` (per-record history), so a
+// past visit shows the grade that was in effect then — not the current pool value. subName is
+// not date-versioned, so it stays current-value.
+function renderActorMetaInlineAt(charName, actorName, date) {
+  const meta = getActorMeta(charName, actorName);
+  if (!meta) return '';
+  let html = '';
+  if (meta.subName) html += `<span class="sub-name">${escapeHtml(meta.subName)}</span>`;
+  const st = statusForDate(charName, actorName, date);
+  if (st) html += `<span class="status-badge ${statusBadgeClass(st)}">${escapeHtml(st)}</span>`;
   return html;
 }
 
@@ -3776,7 +3827,7 @@ function renderHistory() {
         <div class="visit-section">
           <div class="visit-section-title">캐스팅 · ${expandedRows.length}${expandedRows.length !== sortedEntries.length ? ` (${sortedEntries.length}배역, 교체 포함)` : ''}</div>
           ${expandedRows.map(({char, actor, marker}) => {
-            const metaInline = renderActorMetaInline(char, actor);
+            const metaInline = renderActorMetaInlineAt(char, actor, v.date);
             return `
               <div class="visit-entry">
                 <span class="role">${escapeHtml(char)}</span>
@@ -5177,7 +5228,8 @@ function renderCastingTracker() {
           ${recentTimeline.map(t => {
             const meta = d.meta[t.actor] || {};
             const sub = meta.subName ? ` <span class="sub-name">${escapeHtml(meta.subName)}</span>` : '';
-            const status = meta.status ? ` <span class="status-badge ${statusBadgeClass(meta.status)}">${escapeHtml(meta.status)}</span>` : '';
+            const st = statusForDate(char, t.actor, t.date); // grade as of this timeline entry's date
+            const status = st ? ` <span class="status-badge ${statusBadgeClass(st)}">${escapeHtml(st)}</span>` : '';
             const who = t.actor === CASTING_EMPTY ? castingEmptyChipHtml() : `${getActorDotHtml(t.actor)}${escapeHtml(t.actor)}${sub}${status}`;
             return `
               <div class="timeline-item">
@@ -5425,9 +5477,38 @@ function renderPoolEditor() {
         const field = el.dataset.metaField;
         const val = el.value.trim();
         if (!c.actorMeta[actor]) c.actorMeta[actor] = {};
-        if (val) c.actorMeta[actor][field] = val;
-        else delete c.actorMeta[actor][field];
-        if (Object.keys(c.actorMeta[actor]).length === 0) delete c.actorMeta[actor];
+        const meta = c.actorMeta[actor];
+
+        if (field === 'status') {
+          // Grade change is effective-dated: past records keep their old grade, only records
+          // on/after the chosen date get the new one. Prompt for the effective date.
+          const prev = meta.status || '';
+          if (val === prev) return;                       // no real change
+          const t = new Date();
+          const iso = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
+          const input = prompt('등급 변경 적용 시작일 (이 날짜부터의 회차에 반영)\n비우거나 취소하면 변경 취소', iso);
+          if (input === null || input.trim() === '') {    // cancel/empty → abort, revert dropdown
+            el.value = prev;
+            return;
+          }
+          const from = normalizeDateStr(input.trim());
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(from)) {         // invalid format → abort, revert
+            showToast('날짜 형식 오류 (YYYY-MM-DD) — 변경 취소');
+            el.value = prev;
+            return;
+          }
+          recordStatusChange(meta, val, from);            // seed baseline + upsert log entry
+          if (val) meta.status = val; else delete meta.status;  // current value tracks newest edit
+        } else {
+          if (val) meta[field] = val;
+          else delete meta[field];
+        }
+
+        // Cleanup: drop the actor's meta only if truly empty — a lone statusLog is NOT empty.
+        const scalarKeys = Object.keys(meta).filter(k => k !== 'statusLog');
+        if (scalarKeys.length === 0 && !(Array.isArray(meta.statusLog) && meta.statusLog.length)) {
+          delete c.actorMeta[actor];
+        }
         saveState();
         queueCharacterPush(c.name, true); // explicit edit → local value wins
         showToast('저장됨');
@@ -5491,7 +5572,12 @@ function renderPoolEditor() {
         c.actors.push(name);
         const meta = {};
         if (sub) meta.subName = sub;
-        if (status) meta.status = status;
+        if (status) {
+          meta.status = status;
+          const t = new Date();
+          const iso = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
+          meta.statusLog = [{ from: iso, status }]; // seed baseline so future edits are date-aware
+        }
         if (Object.keys(meta).length > 0) {
           if (!c.actorMeta) c.actorMeta = {};
           c.actorMeta[name] = meta;
@@ -5516,7 +5602,12 @@ function renderPoolEditor() {
         c.actors.push(name);
         const meta = {};
         if (sub) meta.subName = sub;
-        if (status) meta.status = status;
+        if (status) {
+          meta.status = status;
+          const t = new Date();
+          const iso = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
+          meta.statusLog = [{ from: iso, status }]; // seed baseline so future edits are date-aware
+        }
         if (Object.keys(meta).length > 0) {
           if (!c.actorMeta) c.actorMeta = {};
           c.actorMeta[name] = meta;
@@ -6818,9 +6909,10 @@ $('#exportCSV').addEventListener('click', () => {
     if (v.casting) {
       Object.entries(v.casting).forEach(([char, actor]) => {
         const meta = getActorMeta(char, actor) || {};
+        const gradeAt = statusForDate(char, actor, v.date); // grade in effect on this visit's date
         rows.push([
           v.id, v.date || '', v.isLegacy ? 'LEGACY' : numMap[v.id],
-          'CASTING', char, actor, meta.subName || '', meta.status || '', v.notes || '', v.isLegacy ? 'Y' : 'N'
+          'CASTING', char, actor, meta.subName || '', gradeAt, v.notes || '', v.isLegacy ? 'Y' : 'N'
         ]);
       });
     }
@@ -8453,6 +8545,11 @@ async function loadFromSupabase() {
             filled[f] = lv; restored = true;
           }
         });
+        // Preserve the effective-date grade history when the remote row lacks it (transition-era
+        // safety: another client may have written status without statusLog).
+        if (!Array.isArray(rm.statusLog) && Array.isArray(lm.statusLog) && lm.statusLog.length) {
+          filled.statusLog = lm.statusLog; restored = true;
+        }
         c.actorMeta[actor] = filled;
       });
       if (restored) queueCharacterPush(c.name);
