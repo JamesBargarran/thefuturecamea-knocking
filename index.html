@@ -8330,6 +8330,7 @@ let pushTimer = null;
 let pushInFlight = false;
 let pushFailed = false;
 let pushErrorCount = 0;
+let pushErrorLabels = []; // 이번 flush 라운드에서 실패한 테이블(+에러코드) 라벨 — 인디케이터 표시용
 
 function persistPushQueue() {
   try {
@@ -8381,9 +8382,12 @@ function updateSyncIndicator() {
   if (!ind) return;
   const pending = pendingPushCount();
   if (pushFailed) {
-    ind.textContent = '⚠ 동기화 실패 — 재시도 중';
+    const which = pushErrorLabels.length ? ' — ' + [...new Set(pushErrorLabels)].join(', ') : '';
+    ind.textContent = `⚠ 동기화 실패${which} — 재시도 중`;
     ind.style.color = 'var(--blood-bright)';
     ind.style.opacity = '1';
+    ind.title = window._lastPushError ? `${window._lastPushError.label}: ${window._lastPushError.message || ''}${window._lastPushError.hint ? ' · ' + window._lastPushError.hint : ''}` : '';
+    ind.style.cursor = 'help';
   } else if (pending > 0 || pushInFlight) {
     ind.textContent = '동기화 중…';
     ind.style.color = 'var(--gold)';
@@ -8476,21 +8480,30 @@ async function flushTable(label, table, rows, conflictKey, deleteKey, deleteVals
   let ok = true;
   if (rows && rows.length > 0) {
     const { error } = await sb.from(table).upsert(rows, { onConflict: conflictKey });
-    if (error) { console.error(label + ' push error', error); ok = false; }
+    if (error) { console.error(label + ' push error', error); ok = false; notePushError(label + ' 저장', error); }
   }
   if (deleteVals && deleteVals.length > 0) {
     let q = sb.from(table).delete();
     if (uidScope) q = q.eq('user_id', uidScope);
     const { error } = await q.in(deleteKey, deleteVals);
-    if (error) { console.error(label + ' delete error', error); ok = false; }
+    if (error) { console.error(label + ' delete error', error); ok = false; notePushError(label + ' 삭제', error); }
   }
   return ok;
+}
+
+// 동기화 실패한 테이블+에러코드를 이번 라운드 목록에 기록 (인디케이터/콘솔 진단용).
+// Supabase(PostgREST) 에러코드: 42703=컬럼없음, 42P01=테이블없음, 42501=RLS차단, 23xxx=제약위반.
+function notePushError(label, error) {
+  const code = (error && (error.code || error.status)) || '?';
+  pushErrorLabels.push(`${label}(${code})`);
+  window._lastPushError = { label, code: error && error.code, message: error && error.message, details: error && error.details, hint: error && error.hint };
 }
 
 async function _flushPushQueueInner() {
   if (!sb || !currentUser) return false;
   const uid = currentUser.id;
   let hadError = false;
+  pushErrorLabels = []; // 이번 라운드 실패 라벨 초기화 (성공 섹션은 안 쌓이므로 남는 건 진짜 실패뿐)
 
   // 1. visit state pushes
   // Snapshot the ids resolved THIS round and delete only these on success, so an item
