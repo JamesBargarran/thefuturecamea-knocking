@@ -6213,8 +6213,17 @@ function openActorModal(actor) {
   const playedChars = {};
   const charDates = {}; // char -> { debut, debutNum, latest, latestNum }
   const numMapForDebut = getVisitNumMap();
+  // 맡은 배역/캐릭터 집계는 이 모달을 연 통계 행과 같은 회차 집합으로 한정한다.
+  // (내 관극 vs 전체 공연 + 월 필터 + legacy 제외 — getPerformerStats와 동일 조건)
+  // 이렇게 하지 않으면 행은 관극한 회차만, 모달은 전체 회차를 세어 회차 수가 어긋난다.
+  const scopedVisits = state.visits.filter(v => {
+    if (v.isLegacy) return false;
+    if (!inStatsMonth(v)) return false;
+    if (statsScope === 'watched') return v.isWatched;
+    return true;
+  });
   // Sort visits chronologically so first dated appearance = debut
-  const visitsChrono = [...state.visits].sort(compareVisitsChrono);
+  const visitsChrono = [...scopedVisits].sort(compareVisitsChrono);
   visitsChrono.forEach(v => {
     if (!v.casting) return;
     const seenInVisit = new Map();
