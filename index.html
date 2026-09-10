@@ -9033,26 +9033,20 @@ async function loadFromSupabase() {
     state.visits.forEach(v => {
       const u = userData.visitState[v.id];
       if (u) {
-        // entries(인카운터) 손실 방지. remote가 비었는데(entries=[]) 로컬엔 인카운터가 있는 경우,
-        // 아래 둘 중 하나면 '아직 동기화 안 된 로컬이 최신'으로 보고 로컬을 유지 + 재push한다:
-        //   (a) 이 visit이 push 큐에 대기 중 (확실한 미동기화), 또는
-        //   (b) remote가 is_watched=true인데 entries만 빔 (관극표시는 갔는데 인카운터 push가 누락된 상태)
-        // 반대로 remote가 is_watched=false && entries=[] 이고 큐에도 없으면 = 의도적 '기록 비움' → remote 존중.
+        // entries(인카운터) 손실 방지 — 데이터 보존 최우선 원칙.
+        // 규칙: remote가 인카운터를 더 많이 갖고 있을 때만 remote로 반영한다.
+        // remote가 비었거나 로컬보다 적으면 로컬을 유지한다. (빈 배열/축소된 배열이 로컬을 절대 못 지움)
+        // 로컬에만 있는(=remote 미반영) 인카운터는 재push해서 클라우드를 로컬에 맞춘다.
         const remoteEntries = Array.isArray(u.entries) ? u.entries : [];
         const localEntries = Array.isArray(v.entries) ? v.entries : [];
-        const remoteEmpty = remoteEntries.length === 0;
-        const queued = pushQueue.visitState.has(v.id);
-        const looksUnsynced = localEntries.length > 0 && remoteEmpty && (queued || u.isWatched);
-        if (looksUnsynced) {
-          queueVisitStatePush(v.id);        // 로컬 유지하고 확실히 다시 올려보냄
-          v.isWatched = v.isWatched || u.isWatched;
-          // v.entries 그대로 유지
+        if (remoteEntries.length >= localEntries.length) {
+          v.entries = remoteEntries;               // remote가 같거나 더 많음 → remote 신뢰
         } else {
-          v.isWatched = u.isWatched;
-          // remote가 인카운터를 갖고 있으면 반영. remote가 비어있으면 = 의도적 '기록 비움'(is_watched=false)로
-          // 판단해 remote를 존중(빈 배열 적용). 위 looksUnsynced 가드가 미동기화 케이스는 이미 걸러냄.
-          v.entries = remoteEntries;
+          // remote가 로컬보다 적음(빈 배열 포함) → 로컬이 최신일 가능성 → 로컬 유지 + 재push
+          if (localEntries.length > 0 && currentUserIsAdmin) queueVisitStatePush(v.id);
         }
+        // isWatched: remote가 관극표시했으면 반영하되, 로컬이 이미 표시했으면 유지(둘 중 하나라도 true면 true)
+        v.isWatched = !!u.isWatched || !!v.isWatched;
         v.watchedAsManderley = !!u.watchedAsManderley;
         v.ratings = u.ratings || null;
         v.review = u.review || '';
