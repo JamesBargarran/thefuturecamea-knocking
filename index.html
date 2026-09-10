@@ -2029,6 +2029,25 @@ function statusForDate(charName, actorName, date) {
   return resolved.status || '';                              // '' (등급 해제) respected → no badge
 }
 
+// Resolve the team (Pink/Blue) in effect for an actor on a given date. Mirrors statusForDate:
+// uses actorMeta[actor].teamLog (effective-dated history) when present; falls back to current .team.
+// teamLog entries are { from:'YYYY-MM-DD', team } sorted ascending by `from`.
+function teamForDate(charName, actorName, date) {
+  const meta = getActorMeta(charName, actorName);
+  if (!meta) return '';
+  const log = Array.isArray(meta.teamLog) ? meta.teamLog : null;
+  if (!log || log.length === 0) return meta.team || '';       // legacy: no history
+  const d = date ? normalizeDateStr(date) : '';
+  if (!d) return meta.team || '';                             // undated record → current value
+  let resolved = null;
+  for (const entry of log) {
+    if (normalizeDateStr(entry.from) <= d) resolved = entry;  // last entry whose from <= d
+    else break;
+  }
+  if (!resolved) return meta.team || '';                      // date precedes all history → current
+  return resolved.team || '';                                 // '' (팀 해제) respected
+}
+
 // Record a grade change into meta.statusLog with an effective date. Keeps the array sorted
 // ascending and de-duplicated by `from` (same-date re-edit replaces, never duplicates). On the
 // first edit, seeds a '0000-01-01' baseline of the PRIOR grade so records dated before `from`
@@ -2047,28 +2066,46 @@ function recordStatusChange(meta, newStatus, fromDate) {
   return log;
 }
 
+// Record a team change into meta.teamLog with an effective date. Mirrors recordStatusChange:
+// seeds a '0000-01-01' baseline of the PRIOR team on first edit so pre-`from` records keep the old team.
+function recordTeamChange(meta, newTeam, fromDate) {
+  const from = normalizeDateStr(fromDate);
+  if (!Array.isArray(meta.teamLog)) meta.teamLog = [];
+  const log = meta.teamLog;
+  if (log.length === 0 && (meta.team || '') !== (newTeam || '')) {
+    log.push({ from: '0000-01-01', team: meta.team || '' });
+  }
+  const existing = log.find(e => normalizeDateStr(e.from) === from);
+  if (existing) existing.team = newTeam || '';
+  else log.push({ from, team: newTeam || '' });
+  log.sort((a, b) => normalizeDateStr(a.from).localeCompare(normalizeDateStr(b.from)));
+  return log;
+}
+
 // 오늘 날짜 YYYY-MM-DD (로컬 기준)
 function todayIso() {
   const t = new Date();
   return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
 }
 
-// 등급 변경 시 '적용 시작일'을 달력(date picker)으로 고르는 다이얼로그. resolves 'YYYY-MM-DD' | null(취소)
+// 등급/팀 변경 시 '적용 시작일'을 달력(date picker)으로 고르는 다이얼로그. resolves 'YYYY-MM-DD' | null(취소)
+// opts.kind = 'status' | 'team' (제목/빈값 라벨 결정)
 function askEffectiveDate(defaultIso, opts) {
   opts = opts || {};
   return new Promise(resolve => {
     const back = document.createElement('div');
     back.className = 'modal-backdrop open';
     back.style.zIndex = '450';
-    const toLabel = opts.to === '' ? '등급 없음' : (opts.to || '');
+    const kindLabel = opts.kind === 'team' ? '팀' : '등급';
+    const toLabel = opts.to === '' ? `${kindLabel} 없음` : (opts.to || '');
     const ctx = opts.actor
       ? `<div class="modal-sub">${escapeHtml(opts.actor)}${opts.char ? ' · ' + escapeHtml(opts.char) : ''}${opts.to !== undefined ? ` → <strong style="color:var(--gold);">${escapeHtml(toLabel)}</strong>` : ''}</div>`
       : '';
     back.innerHTML = `
       <div class="modal" style="max-width:420px; text-align:center;">
-        <h3 style="margin-bottom:6px;">등급 변경 적용 시작일</h3>
+        <h3 style="margin-bottom:6px;">${kindLabel} 변경 적용 시작일</h3>
         ${ctx}
-        <div style="font-size:13px; color:var(--ink-dim); margin:10px 0 14px; line-height:1.6;">이 날짜부터의 회차에 새 등급이 반영됩니다.<br>이전 회차는 기존 등급을 유지합니다.</div>
+        <div style="font-size:13px; color:var(--ink-dim); margin:10px 0 14px; line-height:1.6;">이 날짜부터의 회차에 새 ${kindLabel}이(가) 반영됩니다.<br>이전 회차는 기존 ${kindLabel}을(를) 유지합니다.</div>
         <input type="date" id="aedDate" value="${escapeHtml(defaultIso || '')}" style="font-family:var(--mono); font-size:15px; padding:10px 14px; background:var(--paper); border:1px solid var(--rule); color:var(--ink); text-align:center;">
         <div style="display:flex; gap:10px; justify-content:center; margin-top:18px;">
           <button type="button" class="btn ghost" style="width:auto; padding:12px 22px;" data-aed="cancel">취소</button>
@@ -2098,8 +2135,8 @@ function askEffectiveDate(defaultIso, opts) {
   });
 }
 
-// 배우의 등급(Regular/Swing) 시기별 이력을 통째로 보고 수정하는 편집기.
-// statusLog = [{from:'YYYY-MM-DD', status}] (오름차순). '0000-01-01' 항목은 '맨 처음' 기준선.
+// 배우의 등급(Regular/Swing)·팀(Pink/Blue) 시기별 이력을 한 모달에서 보고 수정하는 편집기.
+// statusLog=[{from,status}] / teamLog=[{from,team}] (오름차순). '0000-01-01' 항목은 '맨 처음' 기준선.
 function manageStatusHistory(charName, actorName) {
   if (guardGuest()) return;
   const c = getCharacterByName(charName);
@@ -2107,75 +2144,90 @@ function manageStatusHistory(charName, actorName) {
   if (!c.actorMeta) c.actorMeta = {};
   if (!c.actorMeta[actorName]) c.actorMeta[actorName] = {};
   const meta = c.actorMeta[actorName];
-  // 작업용 복사본 (저장 눌러야 반영)
-  let work = (Array.isArray(meta.statusLog) ? meta.statusLog : [])
-    .map(e => ({ from: normalizeDateStr(e.from), status: e.status || '' }));
-  work.sort((a, b) => a.from.localeCompare(b.from));
-  // '맨 처음' 기준선(0000-01-01)을 항상 유지: 이게 없으면 첫 전환일 이전 회차가
-  // statusForDate의 폴백으로 '가장 최근 등급'을 잘못 물려받는다. 없으면 가장 이른 등급으로 시드
-  // (기존 단일항목 로그의 동작을 그대로 보존 — 폴백값과 동일).
-  if (work.length === 0 || work[0].from !== '0000-01-01') {
-    work.unshift({ from: '0000-01-01', status: work.length ? work[0].status : (meta.status || '') });
-  }
+
+  // 두 종류의 시기별 이력을 한 모달에서 편집: 등급(status)과 팀(team).
+  // 각 항목은 field로 구분: {key,label,logProp,curProp,valProp,options,mkEmpty}
+  const FIELDS = [
+    { key: 'status', label: '등급', logProp: 'statusLog', curProp: 'status', valProp: 'status',
+      emptyLabel: '등급 없음', options: [['', '등급 없음'], ['Regular', 'Regular'], ['Swing', 'Swing']] },
+    { key: 'team', label: '팀', logProp: 'teamLog', curProp: 'team', valProp: 'team',
+      emptyLabel: '팀 없음', options: [['', '팀 없음'], ['Pink', 'Pink'], ['Blue', 'Blue']] },
+  ];
+
+  // 필드별 작업 복사본 생성 + '맨 처음' 기준선(0000-01-01) 항상 유지.
+  // 기준선이 없으면 첫 전환 이전 회차가 폴백으로 '가장 최근 값'을 잘못 물려받는다.
+  const works = {};
+  FIELDS.forEach(f => {
+    let w = (Array.isArray(meta[f.logProp]) ? meta[f.logProp] : [])
+      .map(e => ({ from: normalizeDateStr(e.from), val: e[f.valProp] || '' }));
+    w.sort((a, b) => a.from.localeCompare(b.from));
+    if (w.length === 0 || w[0].from !== '0000-01-01') {
+      w.unshift({ from: '0000-01-01', val: w.length ? w[0].val : (meta[f.curProp] || '') });
+    }
+    works[f.key] = w;
+  });
 
   const back = document.createElement('div');
   back.className = 'modal-backdrop open';
   back.style.zIndex = '450';
   back.innerHTML = `
-    <div class="modal" style="max-width:480px;">
-      <h3 style="margin-bottom:4px;">등급 이력 · ${escapeHtml(actorName)}</h3>
-      <div class="modal-sub">${escapeHtml(charName)} · 언제부터 어떤 등급인지 구간별로 지정</div>
-      <div id="hsBody" style="margin:16px 0; max-height:50vh; overflow:auto;"></div>
-      <button type="button" class="btn ghost" data-hs-add style="width:auto; padding:9px 16px; font-size:12px;">＋ 전환 추가</button>
-      <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:18px;">
+    <div class="modal" style="max-width:500px;">
+      <h3 style="margin-bottom:4px;">등급·팀 이력 · ${escapeHtml(actorName)}</h3>
+      <div class="modal-sub">${escapeHtml(charName)} · 언제부터 어떤 등급/팀인지 구간별로 지정</div>
+      ${FIELDS.map(f => `
+        <div style="margin-top:16px;">
+          <div style="font-family:var(--mono); font-size:11px; letter-spacing:0.18em; color:var(--gold); text-transform:uppercase; margin-bottom:8px;">${f.label} 이력</div>
+          <div class="hs-body" data-hs-field="${f.key}" style="max-height:30vh; overflow:auto;"></div>
+          <button type="button" class="btn ghost" data-hs-add="${f.key}" style="width:auto; padding:7px 14px; font-size:11px; margin-top:4px;">＋ ${f.label} 전환 추가</button>
+        </div>
+      `).join('')}
+      <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:20px;">
         <button type="button" class="btn ghost" style="width:auto; padding:11px 22px;" data-hs-cancel>취소</button>
         <button type="button" class="btn" style="width:auto; padding:11px 28px;" data-hs-save>저장</button>
       </div>
-      <div style="margin-top:12px; font-size:11px; color:var(--ink-faint); font-style:italic; line-height:1.6;">각 구간은 "그 날짜부터 다음 전환 전까지"의 등급입니다. 창 바깥 클릭 또는 ESC = 취소</div>
+      <div style="margin-top:12px; font-size:11px; color:var(--ink-faint); font-style:italic; line-height:1.6;">각 구간은 "그 날짜부터 다음 전환 전까지" 유효합니다. 창 바깥 클릭 또는 ESC = 취소</div>
     </div>`;
   document.body.appendChild(back);
-  const bodyEl = back.querySelector('#hsBody');
 
-  const statusOpts = (sel) => `
-    <option value="" ${sel === '' ? 'selected' : ''}>등급 없음</option>
-    <option value="Regular" ${sel === 'Regular' ? 'selected' : ''}>Regular</option>
-    <option value="Swing" ${sel === 'Swing' ? 'selected' : ''}>Swing</option>`;
-
-  function rowHtml(e, i) {
+  function optsHtml(f, sel) {
+    return f.options.map(([v, lab]) => `<option value="${escapeHtml(v)}" ${sel === v ? 'selected' : ''}>${escapeHtml(lab)}</option>`).join('');
+  }
+  function rowHtml(f, e, i) {
     const isBase = e.from === '0000-01-01';
     const dateCell = isBase
       ? `<span class="hs-base" title="첫 전환 이전의 모든 회차 (삭제 불가)">맨 처음부터</span>`
       : `<input type="date" value="${escapeHtml(e.from)}" data-hs-date="${i}">`;
-    // 기준선은 삭제 버튼 없음 — 지우면 첫 전환 이전 회차의 등급 구분이 무너진다.
     const delCell = isBase
       ? `<span style="width:28px; flex:0 0 auto;"></span>`
       : `<button type="button" class="hs-del" data-hs-del="${i}" title="이 구간 삭제">×</button>`;
     return `<div class="hs-row" data-hs-i="${i}">
       ${dateCell}
       <span style="color:var(--ink-faint); font-family:var(--mono); font-size:12px;">→</span>
-      <select data-hs-status="${i}">${statusOpts(e.status)}</select>
+      <select data-hs-val="${i}">${optsHtml(f, e.val)}</select>
       ${delCell}
     </div>`;
   }
-  function syncFromDom() {
-    bodyEl.querySelectorAll('.hs-row').forEach(row => {
+  function bodyElOf(key) { return back.querySelector(`.hs-body[data-hs-field="${key}"]`); }
+  function syncFromDom(f) {
+    bodyElOf(f.key).querySelectorAll('.hs-row').forEach(row => {
       const i = parseInt(row.dataset.hsI);
-      if (isNaN(i) || !work[i]) return;
+      const w = works[f.key];
+      if (isNaN(i) || !w[i]) return;
       const d = row.querySelector('[data-hs-date]');
-      if (d && d.value) work[i].from = normalizeDateStr(d.value);
-      const s = row.querySelector('[data-hs-status]');
-      if (s) work[i].status = s.value;
+      if (d && d.value) w[i].from = normalizeDateStr(d.value);
+      const s = row.querySelector('[data-hs-val]');
+      if (s) w[i].val = s.value;
     });
   }
-  function render() {
-    bodyEl.innerHTML = work.length
-      ? work.map(rowHtml).join('')
-      : `<div class="hs-empty">등록된 등급 이력이 없습니다.<br>아래 "전환 추가"로 언제부터 어떤 등급인지 지정하세요.</div>`;
-    bodyEl.querySelectorAll('[data-hs-del]').forEach(btn => {
-      btn.addEventListener('click', () => { syncFromDom(); work.splice(parseInt(btn.dataset.hsDel), 1); render(); });
+  function render(f) {
+    const el = bodyElOf(f.key);
+    const w = works[f.key];
+    el.innerHTML = w.map((e, i) => rowHtml(f, e, i)).join('');
+    el.querySelectorAll('[data-hs-del]').forEach(btn => {
+      btn.addEventListener('click', () => { syncFromDom(f); w.splice(parseInt(btn.dataset.hsDel), 1); render(f); });
     });
   }
-  render();
+  FIELDS.forEach(render);
 
   let done = false;
   function close() {
@@ -2186,38 +2238,47 @@ function manageStatusHistory(charName, actorName) {
   function onKey(e) { if (e.key === 'Escape') close(); }
   back.addEventListener('click', (e) => { if (e.target === back) close(); });
   back.querySelector('[data-hs-cancel]').addEventListener('click', close);
-  back.querySelector('[data-hs-add]').addEventListener('click', () => {
-    syncFromDom();
-    work.push({ from: todayIso(), status: '' });
-    work.sort((a, b) => a.from.localeCompare(b.from));
-    render();
+  back.querySelectorAll('[data-hs-add]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const f = FIELDS.find(x => x.key === btn.dataset.hsAdd);
+      syncFromDom(f);
+      works[f.key].push({ from: todayIso(), val: '' });
+      works[f.key].sort((a, b) => a.from.localeCompare(b.from));
+      render(f);
+    });
   });
   back.querySelector('[data-hs-save]').addEventListener('click', () => {
-    syncFromDom();
-    for (const e of work) {
-      if (e.from !== '0000-01-01' && !/^\d{4}-\d{2}-\d{2}$/.test(e.from)) {
-        showToast('날짜 형식 오류 (YYYY-MM-DD)'); return;
+    // 각 필드 검증
+    for (const f of FIELDS) {
+      syncFromDom(f);
+      for (const e of works[f.key]) {
+        if (e.from !== '0000-01-01' && !/^\d{4}-\d{2}-\d{2}$/.test(e.from)) {
+          showToast(`${f.label} 날짜 형식 오류 (YYYY-MM-DD)`); return;
+        }
       }
     }
-    // 같은 날짜는 마지막 값으로 병합, 오름차순 정렬
-    const map = new Map();
-    work.forEach(e => map.set(e.from, e.status || ''));
-    let cleaned = [...map.entries()]
-      .map(([from, status]) => ({ from, status }))
-      .sort((a, b) => a.from.localeCompare(b.from));
-    // 직전 구간과 등급이 같은 전환은 무의미하므로 접어서 제거 (예: Regular→Regular)
-    cleaned = cleaned.filter((e, i) => i === 0 || e.status !== cleaned[i - 1].status);
-    const newestStatus = cleaned.length ? cleaned[cleaned.length - 1].status : '';
-    // 기준선(0000-01-01) 하나만 남으면 로그는 불필요 — 현재 등급값만으로 동일하게 동작하므로 정리
-    if (cleaned.length <= 1) {
-      delete meta.statusLog;
-      if (newestStatus) meta.status = newestStatus; else delete meta.status;
-    } else {
-      meta.statusLog = cleaned;
-      if (newestStatus) meta.status = newestStatus; else delete meta.status;  // 현재 등급 = 가장 최근 전환값
-    }
-    const scalarKeys = Object.keys(meta).filter(k => k !== 'statusLog');
-    if (scalarKeys.length === 0 && !(Array.isArray(meta.statusLog) && meta.statusLog.length)) {
+    // 각 필드 저장: 같은 날짜 병합 → 중복 구간 접기 → 단일 기준선이면 로그 제거
+    FIELDS.forEach(f => {
+      const map = new Map();
+      works[f.key].forEach(e => map.set(e.from, e.val || ''));
+      let cleaned = [...map.entries()]
+        .map(([from, val]) => ({ from, val }))
+        .sort((a, b) => a.from.localeCompare(b.from));
+      cleaned = cleaned.filter((e, i) => i === 0 || e.val !== cleaned[i - 1].val);
+      const newest = cleaned.length ? cleaned[cleaned.length - 1].val : '';
+      if (cleaned.length <= 1) {
+        delete meta[f.logProp];
+        if (newest) meta[f.curProp] = newest; else delete meta[f.curProp];
+      } else {
+        meta[f.logProp] = cleaned.map(e => ({ from: e.from, [f.valProp]: e.val }));
+        if (newest) meta[f.curProp] = newest; else delete meta[f.curProp];
+      }
+    });
+    // 정말 빈 메타면 정리 (로그 배열은 '빈' 것이 아님)
+    const LOG_KEYS = FIELDS.map(f => f.logProp);
+    const scalarKeys = Object.keys(meta).filter(k => !LOG_KEYS.includes(k));
+    const hasLog = LOG_KEYS.some(k => Array.isArray(meta[k]) && meta[k].length);
+    if (scalarKeys.length === 0 && !hasLog) {
       delete c.actorMeta[actorName];
     }
     saveState();
@@ -2226,7 +2287,7 @@ function manageStatusHistory(charName, actorName) {
     renderPoolEditor();
     if (typeof renderHistory === 'function') renderHistory();
     if (typeof renderStats === 'function') renderStats();
-    showToast('등급 이력 저장됨');
+    showToast('등급·팀 이력 저장됨');
   });
   document.addEventListener('keydown', onKey);
 }
@@ -3295,15 +3356,25 @@ function parsePairQuery(raw) {
   return pairs.length > 0 ? pairs : null;
 }
 
+// 검색어(term, 소문자)가 배역명 또는 그 배역의 별칭 중 하나에 포함되면 true.
+// 예: 'Catherine Campbell (Danvers)'의 별칭이 '댄버스'면, term='댄버스'로도 매칭된다.
+function roleTextMatches(roleName, term) {
+  if (!roleName || !term) return false;
+  if (roleName.toLowerCase().includes(term)) return true;
+  // 정식명 + 별칭 양쪽 검사 (canonicalCharName으로 typo/별칭 표기도 정식으로 접어서 조회)
+  const aliases = charAliases(roleName);
+  return aliases.some(al => (al || '').toLowerCase().includes(term));
+}
+
 // Does a visit satisfy ALL the given role=actor pairs?
-// A pair matches if the visit has a role whose name contains the role text,
+// A pair matches if the visit has a role whose name (or ALIAS) contains the role text,
 // played by an actor whose name contains the actor text. Checks both casting and entries.
 function visitMatchesPairs(v, pairs) {
   return pairs.every(({ role, actor }) => {
     // 1) casting map: { "Nurse Christian Shaw": "David Rafael Botana" }
     if (v.casting) {
       for (const [roleName, actorStr] of Object.entries(v.casting)) {
-        if (!roleName.toLowerCase().includes(role)) continue;
+        if (!roleTextMatches(roleName, role)) continue;      // 정식명 OR 별칭 매칭
         // actorStr may hold replacements ("A → B") or composites ("A X B")
         const actors = splitActorString(actorStr);
         if (actors.some(a => a.toLowerCase().includes(actor))) return true;
@@ -3313,8 +3384,8 @@ function visitMatchesPairs(v, pairs) {
     if (Array.isArray(v.entries)) {
       for (const e of v.entries) {
         const scene = getSceneById(e.sceneId);
-        const roleName = (scene && scene.role) ? scene.role.toLowerCase() : '';
-        if (!roleName.includes(role)) continue;
+        const roleName = (scene && scene.role) ? scene.role : '';
+        if (!roleTextMatches(roleName, role)) continue;      // 정식명 OR 별칭 매칭
         const actors = splitActorString(e.actor);
         if (actors.some(a => a.toLowerCase().includes(actor))) return true;
       }
@@ -3345,9 +3416,11 @@ function renderManderley() {
     if (pairQuery) return visitMatchesPairs(v, pairQuery);
     if (v.notes && v.notes.toLowerCase().includes(term)) return true;
     if (v.date && v.date.toLowerCase().includes(term)) return true;
+    if (v.casting && Object.entries(v.casting).some(([c, a]) =>
+      roleTextMatches(c, term) || a.toLowerCase().includes(term))) return true;   // 배역 별칭도 매칭
     return (v.entries || []).some(e => {
       const scene = getSceneById(e.sceneId);
-      return (scene && scene.role.toLowerCase().includes(term)) ||
+      return (scene && roleTextMatches(scene.role, term)) ||                       // 배역 별칭도 매칭
              (e.actor && e.actor.toLowerCase().includes(term));
     });
   });
@@ -3856,10 +3929,10 @@ function renderHistory() {
     if (v.matinee && v.matinee.toLowerCase().includes(term)) return true;
     if (v.notes && v.notes.toLowerCase().includes(term)) return true;
     if (v.casting && Object.entries(v.casting).some(([c, a]) =>
-      c.toLowerCase().includes(term) || a.toLowerCase().includes(term))) return true;
+      roleTextMatches(c, term) || a.toLowerCase().includes(term))) return true;   // 배역 별칭도 매칭
     return v.entries.some(e => {
       const scene = getSceneById(e.sceneId);
-      return (scene && scene.role.toLowerCase().includes(term)) ||
+      return (scene && roleTextMatches(scene.role, term)) ||                       // 배역 별칭도 매칭
              e.actor.toLowerCase().includes(term);
     });
   });
@@ -5621,7 +5694,7 @@ function renderPoolEditor() {
                     <option value="" ${!m.availability || m.availability === 'Active' ? 'selected' : ''}>Active</option>
                     <option value="Checked Out" ${m.availability === 'Checked Out' ? 'selected' : ''}>Checked Out</option>
                   </select>
-                  <button type="button" class="pa-hist-btn" data-hist-actor="${escapeHtml(a)}" title="등급 시기별 이력 보기·수정">이력${(() => { const n = (m.statusLog || []).filter(e => e.from !== '0000-01-01').length; return n ? ` ·${n}` : ''; })()}</button>
+                  <button type="button" class="pa-hist-btn" data-hist-actor="${escapeHtml(a)}" title="등급·팀 시기별 이력 보기·수정">이력${(() => { const n = ((m.statusLog || []).filter(e => e.from !== '0000-01-01').length) + ((m.teamLog || []).filter(e => e.from !== '0000-01-01').length); return n ? ` ·${n}` : ''; })()}</button>
                 </div>
               </div>
             `;
@@ -5675,12 +5748,13 @@ function renderPoolEditor() {
         const meta = c.actorMeta[actor];
         let needsRerender = false;
 
-        if (field === 'status') {
-          // Grade change is effective-dated: past records keep their old grade, only records
-          // on/after the chosen date get the new one. Pick the effective date on a calendar.
-          const prev = meta.status || '';
+        if (field === 'status' || field === 'team') {
+          // 등급/팀 변경은 effective-dated: 그 날짜 이전 회차는 옛 값을 유지하고, 이후만 새 값.
+          // 달력에서 적용 시작일을 고른다.
+          const curProp = field;                          // meta key ('status' | 'team')
+          const prev = meta[curProp] || '';
           if (val === prev) return;                       // no real change
-          const from = await askEffectiveDate(todayIso(), { actor, char: c.name, to: val });
+          const from = await askEffectiveDate(todayIso(), { actor, char: c.name, to: val, kind: field });
           if (!from) {                                    // cancel → abort, revert dropdown
             el.value = prev;
             return;
@@ -5690,17 +5764,20 @@ function renderPoolEditor() {
             el.value = prev;
             return;
           }
-          recordStatusChange(meta, val, from);            // seed baseline + upsert log entry
-          if (val) meta.status = val; else delete meta.status;  // current value tracks newest edit
+          if (field === 'status') recordStatusChange(meta, val, from);
+          else recordTeamChange(meta, val, from);         // seed baseline + upsert log entry
+          if (val) meta[curProp] = val; else delete meta[curProp];  // current value tracks newest edit
           needsRerender = true;                           // 이력 버튼 카운트 갱신
         } else {
           if (val) meta[field] = val;
           else delete meta[field];
         }
 
-        // Cleanup: drop the actor's meta only if truly empty — a lone statusLog is NOT empty.
-        const scalarKeys = Object.keys(meta).filter(k => k !== 'statusLog');
-        if (scalarKeys.length === 0 && !(Array.isArray(meta.statusLog) && meta.statusLog.length)) {
+        // Cleanup: drop the actor's meta only if truly empty — a lone status/teamLog is NOT empty.
+        const LOG_KEYS = ['statusLog', 'teamLog'];
+        const scalarKeys = Object.keys(meta).filter(k => !LOG_KEYS.includes(k));
+        const hasLog = LOG_KEYS.some(k => Array.isArray(meta[k]) && meta[k].length);
+        if (scalarKeys.length === 0 && !hasLog) {
           delete c.actorMeta[actor];
         }
         saveState();
@@ -5710,7 +5787,7 @@ function renderPoolEditor() {
       });
     });
 
-    // 등급 이력 편집 버튼 (달력 + 구간별 수정)
+    // 등급·팀 이력 편집 버튼 (달력 + 구간별 수정)
     $$('button[data-hist-actor]', card).forEach(btn => {
       btn.addEventListener('click', () => manageStatusHistory(c.name, btn.dataset.histActor));
     });
@@ -8754,10 +8831,13 @@ async function loadFromSupabase() {
             filled[f] = lv; restored = true;
           }
         });
-        // Preserve the effective-date grade history when the remote row lacks it (transition-era
-        // safety: another client may have written status without statusLog).
+        // Preserve the effective-date grade/team history when the remote row lacks it (transition-era
+        // safety: another client may have written status/team without the log).
         if (!Array.isArray(rm.statusLog) && Array.isArray(lm.statusLog) && lm.statusLog.length) {
           filled.statusLog = lm.statusLog; restored = true;
+        }
+        if (!Array.isArray(rm.teamLog) && Array.isArray(lm.teamLog) && lm.teamLog.length) {
+          filled.teamLog = lm.teamLog; restored = true;
         }
         c.actorMeta[actor] = filled;
       });
