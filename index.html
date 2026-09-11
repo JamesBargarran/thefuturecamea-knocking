@@ -1517,11 +1517,18 @@ function mergeNewSeedPerformances(existingVisits) {
   existingVisits.forEach(v => {
     const seed = seedById[v.id];
     if (seed) {
-      // Sync casting from seed (admin-managed) but preserve any personal override:
-      // userCasting is the source of truth, so re-derive casting = seed + userCasting
-      // instead of blanking the override on every load.
+      // seedCasting tracks the embedded baseline (used for non-admin override math).
       v.seedCasting = { ...seed.casting };
-      v.casting = { ...seed.casting, ...(v.userCasting || {}) };
+      const hasUserOverride = v.userCasting && Object.keys(v.userCasting).length > 0;
+      if (currentUserIsAdmin && !hasUserOverride) {
+        // Admin owns v.casting directly (their edits go to v.casting, never userCasting).
+        // NEVER clobber a non-empty existing v.casting with the embedded seed — that reverts
+        // admin edits on every localStorage-only load (cross-tab storage event, offline reload).
+        // Fall back to the embedded seed ONLY when this visit has no casting yet.
+        if (!v.casting || Object.keys(v.casting).length === 0) v.casting = { ...seed.casting };
+      } else {
+        v.casting = { ...seed.casting, ...(v.userCasting || {}) };
+      }
       if (seed.notes && (!v.notes || v.notes === seed.notes)) v.notes = seed.notes;
       v.perfNum = seed.perfNum;
       v.matinee = seed.matinee || '';
@@ -1738,14 +1745,19 @@ function undoLast() {
     Object.assign(state, restored);
     saveState();
 
-    // Re-queue changed visits. queueCastingPush routes correctly (user-added→added-visits,
-    // admin seed→performances, else→visit-state which carries watched/casting/ratings).
+    // Re-queue changed visits. queueCastingPush routes shared casting/notes (user-added→added-visits,
+    // admin seed→performances, else→visit-state). For an admin seed perf it hits ONLY performances,
+    // which has no entries/watched/ratings columns — so ALSO push visit-state to persist those
+    // personal fields the revert may have restored (otherwise undo of a personal edit reverts on reload).
     const afterVisits = {}; (state.visits || []).forEach(v => { afterVisits[v.id] = v; });
     new Set([...Object.keys(beforeVisits), ...Object.keys(afterVisits)]).forEach(id => {
       const a = afterVisits[id];
       const aStr = a ? JSON.stringify(a) : undefined;
       if (beforeVisits[id] !== aStr) {
-        if (a) queueCastingPush(a);
+        if (a) {
+          queueCastingPush(a);
+          if (currentUserIsAdmin && !a.userAdded && a.id && a.id.startsWith('perf_')) queueVisitStatePush(a.id);
+        }
         else queueAddedVisitPush(id); // visit removed by the revert → deletion push
       }
     });
@@ -3280,7 +3292,7 @@ $('#saveVisit').addEventListener('click', async () => {
         v.isWatched = watched;
         touchVisit(v);
         if (v.userAdded || (v.id && !v.id.startsWith('perf_'))) queueAddedVisitPush(v.id);
-        else if (currentUserIsAdmin) queuePerformancePush(v.id);
+        else if (currentUserIsAdmin) { queuePerformancePush(v.id); queueVisitStatePush(v.id); }
         else queueVisitStatePush(v.id);
         showToast(`#${nm[v.id]} 회차에 이어 기록됨`);
         appended = true;
@@ -3352,7 +3364,8 @@ $('#saveVisit').addEventListener('click', async () => {
     if (v.userAdded || (v.id && !v.id.startsWith('perf_'))) {
       queueAddedVisitPush(v.id);
     } else if (currentUserIsAdmin) {
-      queuePerformancePush(v.id);
+      queuePerformancePush(v.id);   // shared: casting/notes/date/matinee
+      queueVisitStatePush(v.id);    // personal: my entries + watched (performances has no such cols)
     } else {
       queueVisitStatePush(v.id);
     }
@@ -7200,7 +7213,7 @@ function importEncounters(file) {
       touchedScenes.forEach(id => queueScenePush(id));
       affected.forEach(v => {
         if (v.userAdded || (v.id && !v.id.startsWith('perf_'))) queueAddedVisitPush(v.id);
-        else if (currentUserIsAdmin) queuePerformancePush(v.id);
+        else if (currentUserIsAdmin) { queuePerformancePush(v.id); queueVisitStatePush(v.id); } // seed perf: entries → visit-state too
         else queueVisitStatePush(v.id);
       });
       hidePreview();
@@ -8776,7 +8789,7 @@ async function _flushPushQueueInner() {
       if (!ok) hadError = true;
       if (ok) sceneBatch.forEach(sid => adminPushQueue.scenes.delete(sid));
     }
-    if (adminPushQueue.performances.size > 0) {
+    if (adminPushQueue.performances.size > 0 && seedLoadComplete) {
       const perfBatch = [...adminPushQueue.performances];
       const rows = []; const deletes = [];
       perfBatch.forEach(pid => {
