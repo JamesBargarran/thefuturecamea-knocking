@@ -83,6 +83,12 @@ nav { display: flex; gap: 0; margin-bottom: 40px; border-bottom: 1px solid var(-
 .cal-filter-chip { font-family: var(--mono); font-size: 10px; color: var(--ink-dim); margin-bottom: 10px; display: flex; align-items: center; gap: 8px; letter-spacing: 0.05em; }
 .cal-filter-chip button { background: transparent; border: 1px solid var(--rule); color: var(--ink-faint); font-family: var(--mono); font-size: 9px; padding: 2px 6px; cursor: pointer; }
 @media (max-width: 600px) { .cal-cell { min-height: 34px; } .cal-dnum { font-size: 10px; } .cal-dot { font-size: 8px; height: 14px; line-height: 14px; min-width: 14px; } }
+.rec-cal { margin-top: 0; }
+.rec-cal-chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--rule); }
+.rec-cal-chips-label { font-family: var(--mono); font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-faint); width: 100%; margin-bottom: 2px; }
+.rec-cal-chip { background: transparent; border: 1px solid var(--gold-dim); color: var(--ink-dim); font-family: var(--mono); font-size: 10px; letter-spacing: 0.06em; padding: 5px 10px; cursor: pointer; border-radius: 3px; transition: all 0.15s; }
+.rec-cal-chip:hover { background: rgba(184, 155, 94, 0.15); color: var(--ink); }
+.rec-cal-chip.active { background: var(--blood-bright); border-color: var(--blood-bright); color: #fff; }
 .nav-sep { align-self: center; width: 1px; height: 16px; background: var(--rule); margin: 0 4px; flex-shrink: 0; pointer-events: none; }
 .tab.active::after { content: ''; position: absolute; bottom: -1px; left: 24px; right: 24px; height: 1px; background: var(--blood-bright); }
 
@@ -723,6 +729,10 @@ body.app-loading::after { content: '동기화 중 · Loading…'; position: fixe
             <option value="__new__">+ 신규 회차로 기록</option>
           </select>
           <div class="hint" style="font-size: 11px; margin-top: 4px;">전체 공연 회차에서 선택하면 그 회차에 인카운터이 추가됩니다. "신규 회차"는 시드에 없는 새 공연용.</div>
+          <div class="rec-cal-wrap" style="margin-top:8px;">
+            <button type="button" class="mini-btn" id="recCalToggle" style="padding:5px 12px;">📅 캘린더로 고르기</button>
+          </div>
+          <div id="recordCalendar" class="visit-cal rec-cal" style="display:none; margin-top:8px; margin-bottom:0;"></div>
         </div>
         <div class="field"><label for="visitDate">Date · 날짜</label><input type="date" id="visitDate"></div>
         <div class="field"><label for="visitMatinee">매티네 / 이브닝</label>
@@ -3179,6 +3189,7 @@ function populateVisitSelector() {
   if (current && [...sel.options].some(o => o.value === current)) {
     sel.value = current;
   }
+  const _rc = $('#recordCalendar'); if (_rc && _rc.style.display !== 'none') renderRecordCalendar();
 }
 
 function applyVisitSelectorChange() {
@@ -3233,6 +3244,25 @@ function applyVisitSelectorChange() {
 }
 
 $('#visitSelector') && $('#visitSelector').addEventListener('change', applyVisitSelectorChange);
+$('#visitSelector') && $('#visitSelector').addEventListener('change', () => {
+  recCalPickDate = null;
+  const el = $('#recordCalendar');
+  if (el && el.style.display !== 'none') renderRecordCalendar();
+});
+$('#recCalToggle') && $('#recCalToggle').addEventListener('click', () => {
+  const el = $('#recordCalendar');
+  const open = el.style.display === 'none';
+  el.style.display = open ? '' : 'none';
+  try { localStorage.setItem('snm_rec_cal_open', open ? '1' : '0'); } catch (e) {}
+  $('#recCalToggle').textContent = open ? '📅 캘린더 접기' : '📅 캘린더로 고르기';
+  if (open) renderRecordCalendar();
+});
+try {
+  if (localStorage.getItem('snm_rec_cal_open') === '1') {
+    const el = $('#recordCalendar');
+    if (el) { el.style.display = ''; const bt = $('#recCalToggle'); if (bt) bt.textContent = '📅 캘린더 접기'; }
+  }
+} catch (e) {}
 
 $('#saveVisit').addEventListener('click', async () => {
   if (guardGuest()) return;
@@ -3411,6 +3441,8 @@ const HISTORY_PAGE_SIZE = 50;
 let calMonth = null;        // {y, m(0-based)} currently viewed month, null=auto
 let calFilterDate = null;   // 'YYYY-MM-DD' active day filter, or null
 let historyMonthFilter = 'all'; // 'YYYY-MM' month filter for history, or 'all'
+let recCalMonth = null;      // Record 탭 회차선택 캘린더가 보는 달 {y,m(0-based)}, null=자동
+let recCalPickDate = null;   // 하루에 회차가 여러 개일 때 펼쳐 고르는 날짜 YYYY-MM-DD
 
 // Pair search: parse a query like "Fate Witch = Haley Sung, Matron = Gabriel" into [{role, actor}, ...]
 // Returns null if the query contains no '=' (so the caller falls back to normal OR search).
@@ -3899,6 +3931,127 @@ function fillMonthSelect(el, cur) {
   return eff;
 }
 function inStatsMonth(v) { return statsMonth === 'all' || (v.date || '').startsWith(statsMonth); }
+
+// ── Record 탭 회차선택 캘린더 (회차가 많을 때 드롭다운 대신 날짜로 고르기) ──
+function recordVisitsByDate() {
+  const map = {};
+  state.visits.forEach(v => {
+    if (v.isLegacy || !v.date) return;
+    (map[v.date] = map[v.date] || []).push(v);
+  });
+  return map;
+}
+
+function selectRecordVisit(vid) {
+  const sel = $('#visitSelector');
+  if (!sel || ![...sel.options].some(o => o.value === vid)) return;
+  sel.value = vid;
+  applyVisitSelectorChange();
+  const v = state.visits.find(x => x.id === vid);
+  if (v && v.date) {
+    const d = new Date(v.date + 'T00:00:00');
+    recCalMonth = { y: d.getFullYear(), m: d.getMonth() };
+  }
+  showToast(`#${getVisitNumMap()[vid] || ''} 회차 선택됨`);
+}
+
+function renderRecordCalendar() {
+  const wrap = $('#recordCalendar');
+  if (!wrap) return;
+  const pad = n => String(n).padStart(2, '0');
+  const byDate = recordVisitsByDate();
+  const counts = {};
+  Object.keys(byDate).forEach(d => { counts[d] = byDate[d].length; });
+
+  const sel = $('#visitSelector');
+  const curVid = sel ? sel.value : '';
+  const curVisit = (curVid && curVid !== '__new__') ? state.visits.find(x => x.id === curVid) : null;
+  const selDate = curVisit ? curVisit.date : null;
+
+  if (!recCalMonth) {
+    const base = selDate || Object.keys(counts).sort().pop();
+    const d = base ? new Date(base + 'T00:00:00') : new Date();
+    recCalMonth = { y: d.getFullYear(), m: d.getMonth() };
+  }
+  const { y, m } = recCalMonth;
+  const startDow = new Date(y, m, 1).getDay();
+  const daysInMonth = new Date(y, m + 1, 0).getDate();
+  const now = new Date();
+  const todayStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  const monthPrefix = `${y}-${pad(m + 1)}`;
+  const monthCount = Object.entries(counts).filter(([d]) => d.startsWith(monthPrefix)).reduce((s, [, c]) => s + c, 0);
+  const numMap = getVisitNumMap();
+
+  let cells = '';
+  for (let i = 0; i < startDow; i++) cells += '<div class="cal-cell cal-empty"></div>';
+  for (let day = 1; day <= daysInMonth; day++) {
+    const ds = `${monthPrefix}-${pad(day)}`;
+    const c = counts[ds] || 0;
+    const dow = (startDow + day - 1) % 7;
+    const cls = ['cal-cell'];
+    if (c > 0) cls.push('cal-has');
+    if (ds === todayStr) cls.push('cal-today');
+    if (ds === selDate) cls.push('cal-sel');
+    if (ds === recCalPickDate) cls.push('cal-sel');
+    if (dow === 0) cls.push('cal-sun');
+    if (dow === 6) cls.push('cal-sat');
+    cells += `<div class="${cls.join(' ')}"${c > 0 ? ` data-rec-day="${ds}" style="cursor:pointer;"` : ''}>`
+      + `<span class="cal-dnum">${day}</span>${c > 0 ? `<span class="cal-dot">${c}</span>` : ''}</div>`;
+  }
+  const wd = ['일', '월', '화', '수', '목', '금', '토'];
+
+  let chipRow = '';
+  if (recCalPickDate && byDate[recCalPickDate] && byDate[recCalPickDate].length > 1) {
+    const list = [...byDate[recCalPickDate]].sort(compareVisitsChrono);
+    chipRow = `<div class="rec-cal-chips"><span class="rec-cal-chips-label">${recCalPickDate} · 회차 선택</span>`
+      + list.map(v => {
+          const active = v.id === curVid ? ' active' : '';
+          const label = `#${numMap[v.id] || '?'}${v.matinee ? ' ' + v.matinee : ''}${v.isWatched ? ' ✓' : ''}`;
+          return `<button type="button" class="rec-cal-chip${active}" data-rec-vid="${escapeHtml(v.id)}">${escapeHtml(label)}</button>`;
+        }).join('')
+      + `</div>`;
+  }
+
+  wrap.innerHTML = `
+    <div class="cal-head">
+      <button class="mini-btn cal-nav" data-rec-nav="-1">◀</button>
+      <div class="cal-title">${y}년 ${m + 1}월 <span class="cal-mcount">· 회차 ${monthCount}</span></div>
+      <button class="mini-btn cal-nav" data-rec-nav="1">▶</button>
+      <button class="mini-btn cal-nav" data-rec-nav="today">오늘</button>
+    </div>
+    <div class="cal-grid cal-weekdays">${wd.map((w, i) => `<div class="cal-wd${i === 0 ? ' cal-sun' : ''}${i === 6 ? ' cal-sat' : ''}">${w}</div>`).join('')}</div>
+    <div class="cal-grid">${cells}</div>
+    ${chipRow}`;
+
+  wrap.querySelectorAll('[data-rec-nav]').forEach(b => b.addEventListener('click', () => {
+    const val = b.dataset.recNav;
+    if (val === 'today') { const d = new Date(); recCalMonth = { y: d.getFullYear(), m: d.getMonth() }; }
+    else {
+      let nm = m + parseInt(val, 10), ny = y;
+      if (nm < 0) { nm = 11; ny--; }
+      if (nm > 11) { nm = 0; ny++; }
+      recCalMonth = { y: ny, m: nm };
+    }
+    renderRecordCalendar();
+  }));
+
+  wrap.querySelectorAll('[data-rec-day]').forEach(cell => cell.addEventListener('click', () => {
+    const ds = cell.dataset.recDay;
+    const list = byDate[ds] || [];
+    if (list.length === 1) {
+      recCalPickDate = null;
+      selectRecordVisit(list[0].id);
+    } else if (list.length > 1) {
+      recCalPickDate = (recCalPickDate === ds) ? null : ds;
+    }
+    renderRecordCalendar();
+  }));
+
+  wrap.querySelectorAll('[data-rec-vid]').forEach(b => b.addEventListener('click', () => {
+    selectRecordVisit(b.dataset.recVid);
+    renderRecordCalendar();
+  }));
+}
 
 function renderVisitCalendar() {
   const wrap = $('#visitCalendar');
