@@ -102,7 +102,7 @@ h2.section-title { font-family: var(--serif-display); font-size: 36px; font-weig
 .section-rule .ornament { font-family: var(--serif-display); color: var(--gold); font-size: 18px; }
 
 .record-grid { display: grid; grid-template-columns: 320px 1fr; gap: 40px; }
-.form-card { background: var(--paper-raised); border: 1px solid var(--rule); padding: 28px; position: sticky; top: 24px; align-self: start; }
+.form-card { background: var(--paper-raised); border: 1px solid var(--rule); padding: 28px; position: sticky; top: 24px; align-self: start; max-height: calc(100vh - 48px); overflow-y: auto; }
 .form-card h3 { font-family: var(--serif-display); font-size: 22px; font-weight: 500; font-style: italic; margin-bottom: 4px; }
 .form-card .sub { font-family: var(--mono); font-size: 10px; letter-spacing: 0.24em; color: var(--gold); text-transform: uppercase; margin-bottom: 24px; }
 
@@ -520,7 +520,7 @@ body.app-loading::after { content: '동기화 중 · Loading…'; position: fixe
 
 @media (max-width: 900px) {
   .record-grid { grid-template-columns: 1fr; }
-  .form-card { position: static; }
+  .form-card { position: static; max-height: none; overflow-y: visible; }
   .container { padding: 20px; }
   .title-block h1 { font-size: 40px; }
   .counter-num { font-size: 48px; }
