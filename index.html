@@ -1038,7 +1038,24 @@ body.app-loading::after { content: '동기화 중 · Loading…'; position: fixe
   <div class="page" id="page-teams">
     <h2 class="section-title">Teams</h2>
     <div class="section-rule"><div class="line"></div><div class="ornament">✦</div><div class="line"></div></div>
-    <div class="casting-intro">스윙·레귤러 및 Pink·Blue 팀 편성을 한눈에. 배우를 클릭하면 등급·팀 이력을 편집합니다. (등급/팀은 "캐스팅 풀 편집"에서 설정한 현재 값 기준)</div>
+    <div class="casting-intro">시즌과 기준일을 고르면 그 날짜 시점의 Pink·Blue 팀 편성과 스윙 풀을 봅니다. 배우를 클릭하면 등급·팀 이력을 편집합니다.</div>
+
+    <div class="history-controls" style="gap:8px; flex-wrap:wrap; align-items:center;">
+      <label style="font-family:var(--mono); font-size:10px; letter-spacing:0.12em; color:var(--ink-faint); text-transform:uppercase;">시즌</label>
+      <select id="teamsSeason" style="min-width:90px;"></select>
+      <label style="font-family:var(--mono); font-size:10px; letter-spacing:0.12em; color:var(--ink-faint); text-transform:uppercase;">기준일</label>
+      <select id="teamsDate" style="min-width:150px;"></select>
+    </div>
+
+    <div class="scene-pool-add admin-only" style="margin:8px 0 16px;">
+      <div class="hint">새 시즌을 추가하려면 시즌명과 시작일을 입력하세요. (시작일부터 다음 시즌 전날까지가 그 시즌 범위)</div>
+      <div class="pool-add-row" style="gap:8px; align-items:center;">
+        <input type="text" id="newSeasonName" placeholder="시즌명 (예: C3)" style="max-width:140px;">
+        <input type="date" id="newSeasonStart" style="max-width:170px;">
+        <button id="addNewSeason" type="button">시즌 추가</button>
+        <button id="delLastSeason" type="button" class="mini-btn">마지막 시즌 삭제</button>
+      </div>
+    </div>
 
     <div class="casting-mode-toggle" id="teamsModeToggle">
       <button class="active" data-tmode="roster">팀 로스터</button>
@@ -1393,6 +1410,15 @@ function defaultCharacters() {
     actorMeta: c.actorMeta ? JSON.parse(JSON.stringify(c.actorMeta)) : {},
     aliases: c.aliases ? [...c.aliases] : []
   }));
+}
+
+// 시즌(캐스팅 사이클) 기본값. 시작일로 정의하며, 다음 시즌 시작 전날까지가 그 시즌 범위.
+// 마지막 시즌은 열려있음(open-ended). 사용자가 팀 탭에서 직접 추가/삭제 가능.
+function defaultSeasons() {
+  return [
+    { id: 'c1', name: 'C1', start: '2025-07-24' },
+    { id: 'c2', name: 'C2', start: '2026-09-09' }
+  ];
 }
 
 function defaultScenes() {
@@ -1887,6 +1913,7 @@ if (!state.actorTags) state.actorTags = {};
 if (!state.performerCheckins) state.performerCheckins = {};
 if (!Array.isArray(state.hiddenPerformers)) state.hiddenPerformers = [];
 if (!Array.isArray(state.manualPerformers)) state.manualPerformers = [];
+if (!Array.isArray(state.seasons) || state.seasons.length === 0) state.seasons = defaultSeasons();
 if (!state.characters) state.characters = defaultCharacters();
 if (!state.scenes) state.scenes = defaultScenes();
 if (!state.aliasShow) state.aliasShow = { casting: true, roles: true, record: true }; // 탭별 별칭 표시 토글(기본 켜짐)
@@ -2085,6 +2112,13 @@ function queueManualPerformerPush(actor) {
   persistPushQueue();
   schedulePush();
 }
+// 시즌 정의(app_config): 전역 공유·admin만. 단일 JSON blob이라 dirty 플래그로 관리.
+function queueSeasonsPush() {
+  if (!sb || !currentUserIsAdmin) return;
+  adminPushQueue.seasonsDirty = true;
+  persistPushQueue();
+  schedulePush();
+}
 function addManualPerformer(actor) {
   actor = (actor || '').trim();
   if (!actor) { showToast('배우명을 입력하세요'); return false; }
@@ -2170,6 +2204,60 @@ function teamForDate(charName, actorName, date) {
   }
   if (!resolved) return meta.team || '';                      // date precedes all history → current
   return resolved.team || '';                                 // '' (팀 해제) respected
+}
+
+// ===== 시즌(캐스팅 사이클) 헬퍼 — 팀 관리 탭에서 시즌·날짜별로 팀 편성을 보기 위함 =====
+// 시즌은 시작일로 정의. 범위 = [start, 다음 시즌 시작 전날]; 마지막 시즌은 열림(end=null).
+function sortedSeasons() {
+  return [...(state.seasons || [])].sort((a, b) =>
+    normalizeDateStr(a.start).localeCompare(normalizeDateStr(b.start)));
+}
+// UTC 기준 날짜 가감 (로컬 타임존 흔들림 없이 하루 빼기/더하기)
+function isoAddDays(iso, n) {
+  const [y, m, d] = normalizeDateStr(iso).split('-').map(Number);
+  const dt = new Date(Date.UTC(y, (m || 1) - 1, (d || 1) + n));
+  return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`;
+}
+// [startIso, endIso|null] — end는 다음 시즌 시작 전날, 마지막 시즌은 null(열림)
+function seasonDateRange(seasonId) {
+  const ss = sortedSeasons();
+  const i = ss.findIndex(s => s.id === seasonId);
+  if (i < 0) return null;
+  const start = normalizeDateStr(ss[i].start);
+  const next = ss[i + 1];
+  return next ? [start, isoAddDays(normalizeDateStr(next.start), -1)] : [start, null];
+}
+// 주어진 날짜가 속한 시즌(첫 시즌보다 이르면 null)
+function seasonForDate(date) {
+  const d = normalizeDateStr(date);
+  let found = null;
+  for (const s of sortedSeasons()) {
+    if (normalizeDateStr(s.start) <= d) found = s; else break;
+  }
+  return found;
+}
+// 시즌 범위 내 공연 날짜(중복 제거·오름차순, legacy·무날짜 제외). 마지막 원소 = 그 시즌 최신일
+function datesInSeason(seasonId) {
+  const range = seasonDateRange(seasonId);
+  if (!range) return [];
+  const [start, end] = range;
+  const set = new Set();
+  (state.visits || []).forEach(v => {
+    if (v.isLegacy || !v.date) return;
+    const d = normalizeDateStr(v.date);
+    if (d < start) return;
+    if (end !== null && d > end) return;
+    set.add(d);
+  });
+  return [...set].sort((a, b) => a.localeCompare(b));
+}
+// 특정 날짜에 이 배역에서 team의 Regular였던 배우들 (현재 풀 c.actors를 순회하되 등급/팀은 날짜로 해석).
+// teamRegularCandidates(현재값 기반)는 캐스팅 에디터가 쓰므로 건드리지 않고 별도 제공.
+function teamRegularsForDate(charName, team, date) {
+  const c = getCharacterByName(charName);
+  return ((c && c.actors) || []).filter(a =>
+    statusForDate(charName, a, date) === 'Regular' &&
+    teamForDate(charName, a, date) === team);
 }
 
 // Record a grade change into meta.statusLog with an effective date. Keeps the array sorted
@@ -5847,22 +5935,63 @@ $('#castingSort').addEventListener('change', renderCastingTracker);
 // ============ TEAMS (팀 관리 · read-only view + click-to-edit) ============
 // 현재 팀 편성을 한 화면에. 편집은 배우 클릭 → manageStatusHistory (기존 편집기 재사용).
 // 현재 스칼라값(meta.status/meta.team) 기준 = "지금 구조" 뷰. 회차별 값(statusForDate)이 아님.
-function teamsChipHtml(charName, actor, m) {
-  m = m || {};
+// opts(선택): { status, team, hideCO } — 날짜 해석된 등급/팀을 우선 사용하고, hideCO면 체크아웃 표시 생략.
+// opts 없으면 현재값(m.status/m.team/m.availability) 기준 기존 동작.
+function teamsChipHtml(charName, actor, m, opts) {
+  m = m || {}; opts = opts || {};
+  const status = ('status' in opts) ? opts.status : m.status;
+  const team   = ('team'   in opts) ? opts.team   : m.team;
   const sub = m.subName ? ` <span class="sub-name">${escapeHtml(m.subName)}</span>` : '';
-  const st  = m.status ? ` <span class="status-badge ${statusBadgeClass(m.status)}">${escapeHtml(m.status)}</span>` : '';
-  const tm  = m.team   ? ` <span class="team-${m.team.toLowerCase()}">${escapeHtml(m.team)}</span>` : '';
-  const co  = (m.availability === 'Checked Out') ? ' <span class="avail-mark avail-checkedout">✱ CO</span>' : '';
-  const inactive = (m.availability === 'Checked Out') ? ' is-inactive' : '';
+  const st  = status ? ` <span class="status-badge ${statusBadgeClass(status)}">${escapeHtml(status)}</span>` : '';
+  const tm  = team   ? ` <span class="team-${String(team).toLowerCase()}">${escapeHtml(team)}</span>` : '';
+  const showCO = !opts.hideCO && m.availability === 'Checked Out';
+  const co  = showCO ? ' <span class="avail-mark avail-checkedout">✱ CO</span>' : '';
+  const inactive = showCO ? ' is-inactive' : '';
   return `<span class="team-chip${inactive}" data-teams-char="${escapeHtml(charName)}" data-teams-actor="${escapeHtml(actor)}">${getActorDotHtml(actor)}${escapeHtml(actor)}${sub}${st}${tm}${co}</span>`;
 }
 
+// 선택된 시즌·날짜 (탭 전환에도 유지 — bulkCurrentVisitId 패턴)
+let teamsSeasonId = null;
+let teamsDate = null;
+
+function populateTeamsSeasonSelect() {
+  const sel = $('#teamsSeason'); if (!sel) return;
+  const ss = sortedSeasons();
+  sel.innerHTML = ss.map(s => `<option value="${escapeHtml(s.id)}">${escapeHtml(s.name)}</option>`).join('');
+  if (!ss.find(s => s.id === teamsSeasonId)) teamsSeasonId = ss.length ? ss[ss.length - 1].id : null; // 기본=최신 시즌
+  if (teamsSeasonId) sel.value = teamsSeasonId;
+}
+function populateTeamsDateSelect() {
+  const sel = $('#teamsDate'); if (!sel) return;
+  const dates = teamsSeasonId ? datesInSeason(teamsSeasonId) : [];
+  sel.innerHTML = dates.length
+    ? dates.map(d => `<option value="${d}">${d}</option>`).join('')
+    : '<option value="">— 공연 기록 없음 —</option>';
+  if (!dates.includes(teamsDate)) teamsDate = dates.length ? dates[dates.length - 1] : ''; // 기본=시즌 최신일
+  sel.value = teamsDate || '';
+}
+
 function renderTeams() {
+  // 셀렉터를 매 렌더마다 현재 state.seasons/state.visits 기준으로 갱신(멱등). 저장훅/디스패처가 셀렉터를
+  // 건드리기 전에 호출해도 안전하게 모듈변수(teamsSeasonId/teamsDate)로 동작.
+  populateTeamsSeasonSelect();
+  populateTeamsDateSelect();
+  const date = teamsDate;
+
   const term = ($('#teamsSearch') && $('#teamsSearch').value || '').toLowerCase().trim();
   const activeBtn = $$('#teamsModeToggle button').find(b => b.classList.contains('active'));
   const mode = activeBtn ? activeBtn.dataset.tmode : 'roster';
   $('#teams-roster-mode').style.display = mode === 'roster' ? 'block' : 'none';
   $('#teams-byrole-mode').style.display = mode === 'byrole' ? 'block' : 'none';
+
+  const emptyMsg = (msg) => `<div style="padding: 40px; text-align: center; color: var(--ink-faint); font-style: italic; grid-column: 1 / -1;">${msg}</div>`;
+
+  // 시즌에 공연 날짜가 없으면 스냅샷 기준이 없음 → 빈 상태
+  if (!date) {
+    const target = mode === 'roster' ? $('#teamsRosterBoard') : $('#teamsRoleGrid');
+    target.innerHTML = emptyMsg('이 시즌에는 공연 기록이 없습니다.');
+    return;
+  }
 
   // 배역이 검색어에 걸리는가 (배역명/별칭/풀 배우명)
   const charMatches = (c) => !term
@@ -5871,25 +6000,27 @@ function renderTeams() {
     || c.actors.some(a => a.toLowerCase().includes(term));
   // 배우가 검색어에 걸리는가 (배역이 이름으로 걸린 경우엔 배우 필터를 풀어 전체 표시)
   const actorMatches = (charHit, actor) => !term || charHit || actor.toLowerCase().includes(term);
+  const charHitOf = (c) => !term || c.name.toLowerCase().includes(term)
+    || (c.aliases || []).some(al => al.toLowerCase().includes(term));
 
   const chars = sortedCharacters().filter(charMatches);
 
   if (mode === 'roster') {
     const board = $('#teamsRosterBoard');
     if (chars.length === 0) {
-      board.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--ink-faint); font-style: italic; grid-column: 1 / -1;">검색 결과 없음</div>';
+      board.innerHTML = emptyMsg('검색 결과 없음');
     } else {
       const teams = [['Pink', 'pink'], ['Blue', 'blue']];
       const cols = teams.map(([team, cls]) => {
         let total = 0;
         const rows = chars.map(c => {
-          const charHit = !term || c.name.toLowerCase().includes(term)
-            || (c.aliases || []).some(al => al.toLowerCase().includes(term));
+          const charHit = charHitOf(c);
           const meta = c.actorMeta || {};
-          const regs = teamRegularCandidates(c.name, team).filter(a => actorMatches(charHit, a));
+          // 날짜 기준: 그날 이 배역에서 team의 Regular였던 배우
+          const regs = teamRegularsForDate(c.name, team, date).filter(a => actorMatches(charHit, a));
           total += regs.length;
           const cell = regs.length
-            ? `<div class="team-role-actors">${regs.map(a => teamsChipHtml(c.name, a, meta[a])).join('')}</div>`
+            ? `<div class="team-role-actors">${regs.map(a => teamsChipHtml(c.name, a, meta[a], { status: 'Regular', team, hideCO: true })).join('')}</div>`
             : '<span class="team-empty">—</span>';
           return `<div class="team-role-row"><span class="team-role-name">${escapeHtml(c.name)}</span>${cell}</div>`;
         }).join('');
@@ -5899,46 +6030,42 @@ function renderTeams() {
         </div>`;
       }).join('');
 
-      // 스윙 풀: 배역별 status==='Swing' 배우
+      // 스윙 풀: 그날 status가 Swing이던 배우
       let swingTotal = 0;
       const swingRows = chars.map(c => {
-        const charHit = !term || c.name.toLowerCase().includes(term)
-          || (c.aliases || []).some(al => al.toLowerCase().includes(term));
+        const charHit = charHitOf(c);
         const meta = c.actorMeta || {};
-        const swings = c.actors.filter(a => (meta[a] || {}).status === 'Swing' && actorMatches(charHit, a));
+        const swings = c.actors.filter(a => statusForDate(c.name, a, date) === 'Swing' && actorMatches(charHit, a));
         if (!swings.length) return '';
         swingTotal += swings.length;
-        return `<div class="team-role-row"><span class="team-role-name">${escapeHtml(c.name)}</span><div class="team-role-actors">${swings.map(a => teamsChipHtml(c.name, a, meta[a])).join('')}</div></div>`;
+        return `<div class="team-role-row"><span class="team-role-name">${escapeHtml(c.name)}</span><div class="team-role-actors">${swings.map(a => teamsChipHtml(c.name, a, meta[a], { status: 'Swing', team: teamForDate(c.name, a, date), hideCO: true })).join('')}</div></div>`;
       }).join('');
       const swingSection = `<div class="teams-swing-section"><div class="team-col">
         <div class="team-col-head"><span>스윙 풀 · Swing</span><span class="tc-count">${swingTotal}명</span></div>
-        ${swingRows || '<div style="padding: 12px 0; color: var(--ink-faint); font-style: italic;">지정된 스윙 없음</div>'}
+        ${swingRows || '<div style="padding: 12px 0; color: var(--ink-faint); font-style: italic;">이 날짜 기준 지정된 스윙 없음</div>'}
       </div></div>`;
 
       board.innerHTML = cols + swingSection;
     }
   } else {
-    // 배역별: 배역 카드마다 Regular·Pink / Regular·Blue / Swing / 무등급 그룹
+    // 배역별: 배역 카드마다 Regular·Pink / Regular·Blue / Swing / 무등급 그룹 (선택 날짜 기준)
     const grid = $('#teamsRoleGrid');
     const teamRank = { 'Pink': 0, 'Blue': 1 };
     const cards = chars.map(c => {
-      const charHit = !term || c.name.toLowerCase().includes(term)
-        || (c.aliases || []).some(al => al.toLowerCase().includes(term));
+      const charHit = charHitOf(c);
       const meta = c.actorMeta || {};
+      const resolved = {}; // actor -> { st, tm } (그날 등급/팀)
       const groups = { 'Regular·Pink': [], 'Regular·Blue': [], 'Swing': [], '무등급': [] };
       c.actors.filter(a => actorMatches(charHit, a)).forEach(a => {
-        const m = meta[a] || {};
-        if (m.status === 'Regular') groups[m.team === 'Blue' ? 'Regular·Blue' : (m.team === 'Pink' ? 'Regular·Pink' : '무등급')].push(a);
-        else if (m.status === 'Swing') groups['Swing'].push(a);
+        const st = statusForDate(c.name, a, date);
+        const tm = teamForDate(c.name, a, date);
+        resolved[a] = { st, tm };
+        if (st === 'Regular') groups[tm === 'Blue' ? 'Regular·Blue' : (tm === 'Pink' ? 'Regular·Pink' : '무등급')].push(a);
+        else if (st === 'Swing') groups['Swing'].push(a);
         else groups['무등급'].push(a);
       });
-      // Regular 무팀은 '무등급' 대신 Swing 아래 별도? — 팀 없는 Regular는 드묾: 무등급 버킷에 둠(뱃지로 구분됨).
       const sortBucket = (arr) => arr.sort((a, b) => {
-        const ma = meta[a] || {}, mb = meta[b] || {};
-        const ia = (ma.availability === 'Checked Out') ? 1 : 0;
-        const ib = (mb.availability === 'Checked Out') ? 1 : 0;
-        if (ia !== ib) return ia - ib;                       // Checked Out 뒤로
-        const ta = teamRank[ma.team] ?? 2, tb = teamRank[mb.team] ?? 2;
+        const ta = teamRank[resolved[a].tm] ?? 2, tb = teamRank[resolved[b].tm] ?? 2;
         if (ta !== tb) return ta - tb;                       // Pink→Blue→none
         return a.localeCompare(b);
       });
@@ -5946,7 +6073,7 @@ function renderTeams() {
       if (totalShown === 0) return '';
       const body = Object.entries(groups).filter(([, arr]) => arr.length).map(([label, arr]) =>
         `<div class="teams-role-group-label">${label} · ${arr.length}</div>
-         <div class="teams-role-group">${sortBucket(arr).map(a => teamsChipHtml(c.name, a, meta[a])).join('')}</div>`
+         <div class="teams-role-group">${sortBucket(arr).map(a => teamsChipHtml(c.name, a, meta[a], { status: resolved[a].st, team: resolved[a].tm, hideCO: true })).join('')}</div>`
       ).join('');
       return `<div class="character-card">
         <div class="char-header">
@@ -5956,13 +6083,45 @@ function renderTeams() {
         ${body}
       </div>`;
     }).filter(Boolean).join('');
-    grid.innerHTML = cards || '<div style="padding: 40px; text-align: center; color: var(--ink-faint); font-style: italic; grid-column: 1 / -1;">검색 결과 없음</div>';
+    grid.innerHTML = cards || emptyMsg('검색 결과 없음');
   }
 
   // 배우 칩 클릭 → 기존 편집기 (게스트 차단은 manageStatusHistory 내부 guardGuest)
   $$('#page-teams .team-chip').forEach(el => {
     el.addEventListener('click', () => manageStatusHistory(el.dataset.teamsChar, el.dataset.teamsActor));
   });
+}
+
+// 시즌 추가/삭제 (관리자만 — .admin-only 로 UI 숨김 + 핸들러 방어 가드)
+function addSeasonFromUI() {
+  if (!currentUserIsAdmin) { showToast('관리자만 시즌을 추가할 수 있습니다'); return; }
+  const name = ($('#newSeasonName').value || '').trim();
+  const start = normalizeDateStr(($('#newSeasonStart').value || '').trim());
+  if (!name) { showToast('시즌명을 입력하세요'); return; }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(start)) { showToast('시작일을 선택하세요'); return; }
+  if ((state.seasons || []).some(s => s.name === name)) { showToast('이미 있는 시즌명'); return; }
+  if ((state.seasons || []).some(s => normalizeDateStr(s.start) === start)) { showToast('이미 있는 시작일'); return; }
+  const id = 'season_' + Date.now().toString(36);
+  state.seasons = [...(state.seasons || []), { id, name, start }];
+  saveState();
+  queueSeasonsPush();
+  teamsSeasonId = id; teamsDate = null;
+  $('#newSeasonName').value = ''; $('#newSeasonStart').value = '';
+  renderTeams();
+  showToast(`시즌 추가됨 — ${name}`);
+}
+function deleteLastSeason() {
+  if (!currentUserIsAdmin) { showToast('관리자만 삭제할 수 있습니다'); return; }
+  const ss = sortedSeasons();
+  if (ss.length <= 1) { showToast('시즌은 최소 1개 유지'); return; }
+  const last = ss[ss.length - 1];
+  if (!confirm(`시즌 "${last.name}" (${last.start}~) 를 삭제할까요?`)) return;
+  state.seasons = state.seasons.filter(s => s.id !== last.id);
+  saveState();
+  queueSeasonsPush();
+  if (teamsSeasonId === last.id) { teamsSeasonId = null; teamsDate = null; }
+  renderTeams();
+  showToast(`시즌 삭제됨 — ${last.name}`);
 }
 
 // 모드 토글 (로스터 | 배역별)
@@ -5975,6 +6134,13 @@ $$('#teamsModeToggle button').forEach(b => {
   });
 });
 $('#teamsSearch') && $('#teamsSearch').addEventListener('input', debounce(renderTeams, 180));
+$('#teamsSeason') && $('#teamsSeason').addEventListener('change', (e) => {
+  teamsSeasonId = e.target.value; teamsDate = null;   // 시즌 바뀌면 날짜는 최신으로 리셋
+  renderTeams();
+});
+$('#teamsDate') && $('#teamsDate').addEventListener('change', (e) => { teamsDate = e.target.value; renderTeams(); });
+$('#addNewSeason') && $('#addNewSeason').addEventListener('click', addSeasonFromUI);
+$('#delLastSeason') && $('#delLastSeason').addEventListener('click', deleteLastSeason);
 
 // BULK EDITOR
 let bulkCurrentVisitId = null;
@@ -8727,14 +8893,15 @@ async function pushSeedToSupabase() {
 async function fetchSeedFromSupabase() {
   // Returns { characters, scenes, performances, performer_checkins } from Supabase
   if (!sb) return null;
-  const [chars, scenes, perfs, checkins, hidden, manual, aliasProbe] = await Promise.all([
+  const [chars, scenes, perfs, checkins, hidden, manual, aliasProbe, appCfg] = await Promise.all([
     sb.from('characters').select('*').order('sort_idx'),
     sb.from('scenes').select('*').order('sort_idx'),
     sb.from('performances').select('*').order('date'),
     sb.from('performer_checkins').select('*'),
     sb.from('hidden_performers').select('actor_name'),
     sb.from('manual_performers').select('actor_name'),   // 테이블 없어도 {error}만 옴(전체 안 깨짐)
-    sb.from('characters').select('aliases').limit(1)   // aliases 컬럼 존재 프로브 (없으면 error)
+    sb.from('characters').select('aliases').limit(1),  // aliases 컬럼 존재 프로브 (없으면 error)
+    sb.from('app_config').select('key,value').eq('key', 'seasons').maybeSingle()  // 시즌 정의(없으면 {data:null})
   ]);
   CHARACTERS_HAS_ALIASES = !aliasProbe.error;
   return {
@@ -8759,7 +8926,10 @@ async function fetchSeedFromSupabase() {
       return acc;
     }, {}),
     hiddenPerformers: (hidden.data || []).map(r => r.actor_name),
-    manualPerformers: (manual.data || []).map(r => r.actor_name)
+    manualPerformers: (manual.data || []).map(r => r.actor_name),
+    // 시즌: 행/테이블 없으면 null → 로컬 폴백. 있으면 배열.
+    seasons: (appCfg && appCfg.data && appCfg.data.value && Array.isArray(appCfg.data.value.seasons))
+      ? appCfg.data.value.seasons : null
   };
 }
 
@@ -8822,7 +8992,8 @@ function persistPushQueue() {
         performances: [...adminPushQueue.performances],
         checkins: [...adminPushQueue.checkins],
         hidden: [...adminPushQueue.hidden],
-        manualPerformers: [...adminPushQueue.manualPerformers]
+        manualPerformers: [...adminPushQueue.manualPerformers],
+        seasonsDirty: adminPushQueue.seasonsDirty
       },
       forceMeta: [...adminForceMetaChars]
     }));
@@ -8845,6 +9016,7 @@ function restorePushQueue() {
       (d.admin.checkins || []).forEach(x => adminPushQueue.checkins.add(x));
       (d.admin.hidden || []).forEach(x => adminPushQueue.hidden.add(x));
       (d.admin.manualPerformers || []).forEach(x => adminPushQueue.manualPerformers.add(x));
+      if (d.admin.seasonsDirty) adminPushQueue.seasonsDirty = true;
     }
     (d.forceMeta || []).forEach(x => adminForceMetaChars.add(x));
   } catch (e) {}
@@ -8854,7 +9026,7 @@ function pendingPushCount() {
   return pushQueue.visitState.size + pushQueue.tags.size + pushQueue.watchlist.size + pushQueue.addedVisits.size +
     adminPushQueue.characters.size + adminPushQueue.scenes.size +
     adminPushQueue.performances.size + adminPushQueue.checkins.size + adminPushQueue.hidden.size +
-    adminPushQueue.manualPerformers.size;
+    adminPushQueue.manualPerformers.size + (adminPushQueue.seasonsDirty ? 1 : 0);
 }
 
 function updateSyncIndicator() {
@@ -9168,6 +9340,13 @@ async function _flushPushQueueInner() {
       if (!ok) hadError = true;
       if (ok) mpBatch.forEach(actor => adminPushQueue.manualPerformers.delete(actor));
     }
+    if (adminPushQueue.seasonsDirty) {
+      // 시즌 정의는 app_config 단일 행(key='seasons', value={seasons:[...]}). upsert on key.
+      const row = { key: 'seasons', value: { seasons: state.seasons || [] } };
+      const ok = await flushTable('seasons', 'app_config', [row], 'key', 'key', [], null);
+      if (!ok) hadError = true;
+      if (ok) adminPushQueue.seasonsDirty = false;
+    }
   }
   return hadError;
 }
@@ -9179,7 +9358,8 @@ const adminPushQueue = {
   performances: new Set(),// by id
   checkins: new Set(),    // by actor_name
   hidden: new Set(),      // hidden performer actor_name (shared globally)
-  manualPerformers: new Set() // manually-registered performer actor_name (shared globally)
+  manualPerformers: new Set(), // manually-registered performer actor_name (shared globally)
+  seasonsDirty: false     // 시즌 정의(app_config)는 단일 JSON blob — 플래그로 관리
 };
 // Characters whose actor_meta should be pushed AS-IS (no merge), because the user
 // explicitly edited team/availability/status and intends the local value to win —
@@ -9406,6 +9586,19 @@ async function loadFromSupabase() {
     }
   }
 
+  // 시즌 정의(app_config) — hidden/manual과 동일한 shared/admin 규칙.
+  // 원격이 없으면(테이블/행 미생성 포함) 로컬 기본값을 지키고, admin이면 한 번 올려보낸다.
+  {
+    const remoteSeasons = seed.seasons; // null이면 미존재
+    const localSeasons = (Array.isArray(state.seasons) && state.seasons.length) ? state.seasons : defaultSeasons();
+    if (!remoteSeasons || remoteSeasons.length === 0) {
+      state.seasons = localSeasons;
+      if (currentUserIsAdmin) queueSeasonsPush();
+    } else {
+      state.seasons = remoteSeasons;
+    }
+  }
+
   // Now merge user data from Supabase (overrides local where applicable)
   const userData = await fetchUserDataFromSupabase();
   if (userData) {
@@ -9540,6 +9733,7 @@ async function bootApp() {
         state.performerCheckins = seed.performer_checkins || {};
         state.hiddenPerformers = seed.hiddenPerformers || [];
         state.manualPerformers = seed.manualPerformers || [];
+        state.seasons = (seed.seasons && seed.seasons.length) ? seed.seasons : defaultSeasons(); // 게스트: 클라우드 우선, 없으면 기본
         normalizeCastingKeys(state.visits);
         saveState();
       }
