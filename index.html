@@ -306,6 +306,26 @@ body.app-loading::after { content: '동기화 중 · Loading…'; position: fixe
 .dist-block.is-inactive { opacity: 0.5; }
 .sub-name { font-family: var(--serif-display); font-style: italic; color: var(--ink-faint); font-size: 12px; }
 
+/* ===== TEAMS TAB (팀 관리) ===== */
+.teams-roster-board { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+.teams-swing-section { margin-top: 24px; }
+.team-col { background: var(--paper-raised); border: 1px solid var(--rule); padding: 20px; }
+.team-col.pink { border-top: 2px solid var(--team-pink); }
+.team-col.blue { border-top: 2px solid var(--team-blue); }
+.team-col-head { font-family: var(--mono); font-size: 11px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--gold); margin-bottom: 14px; padding-bottom: 10px; border-bottom: 1px solid var(--rule); display: flex; justify-content: space-between; align-items: baseline; }
+.team-col-head .tc-count { color: var(--ink-faint); font-size: 9px; }
+.team-role-row { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; padding: 6px 0; border-bottom: 1px solid var(--rule); font-size: 13px; }
+.team-role-row:last-child { border-bottom: none; }
+.team-role-name { color: var(--ink-dim); font-family: var(--serif-display); font-style: italic; flex: 0 0 auto; }
+.team-role-actors { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+.team-chip { cursor: pointer; display: inline-flex; align-items: center; gap: 5px; font-family: var(--mono); font-size: 11px; padding: 3px 7px; border: 1px solid var(--rule); background: var(--paper-deep); color: var(--ink); transition: border-color 0.15s; }
+.team-chip:hover { border-color: var(--gold); }
+.team-chip.is-inactive { opacity: 0.5; }
+.team-chip .color-dot, .team-chip .chip-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+.team-empty { color: var(--ink-faint); font-style: italic; font-family: var(--serif-display); }
+.teams-role-group-label { font-family: var(--mono); font-size: 9px; letter-spacing: 0.15em; text-transform: uppercase; color: var(--ink-faint); margin: 12px 0 6px; }
+.teams-role-group { display: flex; flex-wrap: wrap; gap: 6px; }
+
 .timeline { margin-top: 14px; border-top: 1px dotted var(--rule); padding-top: 14px; }
 .timeline-title { font-family: var(--mono); font-size: 10px; letter-spacing: 0.24em; text-transform: uppercase; color: var(--ink-faint); margin-bottom: 10px; }
 .timeline-list { display: flex; flex-direction: column; gap: 4px; max-height: 200px; overflow-y: auto; }
@@ -613,7 +633,7 @@ body.app-loading::after { content: '동기화 중 · Loading…'; position: fixe
   .stat-card { min-width: 0; padding: 14px 12px; }
   .stat-num { font-size: 28px; }
   /* Single-column for wide card grids on very small phones (prevents card overflow) */
-  .casting-tracker-grid, .scene-pool-grid, .role-grid { grid-template-columns: 1fr; }
+  .casting-tracker-grid, .scene-pool-grid, .role-grid, .teams-roster-board { grid-template-columns: 1fr; }
 }
 
 ::-webkit-scrollbar { width: 8px; height: 8px; }
@@ -710,6 +730,7 @@ body.app-loading::after { content: '동기화 중 · Loading…'; position: fixe
     <button class="tab" data-page="interactions">인터랙션 통계 · Interactions</button>
     <span class="nav-sep" aria-hidden="true"></span>
     <button class="tab" data-page="casting">캐스팅 · Casting</button>
+    <button class="tab" data-page="teams">팀 관리 · Teams</button>
     <button class="tab" data-page="scenes">장면 풀 · Scenes</button>
     <button class="tab" data-page="pairing">페어링 · Pairing</button>
     <button class="tab" data-page="performers">퍼포머 · Performers</button>
@@ -1011,6 +1032,29 @@ body.app-loading::after { content: '동기화 중 · Loading…'; position: fixe
     <div id="casting-pool-mode" style="display: none;">
       <div class="casting-intro">캐스팅 풀에 새 배우를 추가하거나 Regular/Swing 상태·부속 이름을 수정할 수 있습니다. 풀에서 빼도 이미 기록된 캐스팅은 보존됩니다.</div>
       <div class="pool-editor-list" id="poolEditorList"></div>
+    </div>
+  </div>
+
+  <div class="page" id="page-teams">
+    <h2 class="section-title">Teams</h2>
+    <div class="section-rule"><div class="line"></div><div class="ornament">✦</div><div class="line"></div></div>
+    <div class="casting-intro">스윙·레귤러 및 Pink·Blue 팀 편성을 한눈에. 배우를 클릭하면 등급·팀 이력을 편집합니다. (등급/팀은 "캐스팅 풀 편집"에서 설정한 현재 값 기준)</div>
+
+    <div class="casting-mode-toggle" id="teamsModeToggle">
+      <button class="active" data-tmode="roster">팀 로스터</button>
+      <button data-tmode="byrole">배역별</button>
+    </div>
+
+    <div class="history-controls">
+      <input type="text" id="teamsSearch" placeholder="배역 또는 배우 검색…" style="flex: 1; min-width: 240px;">
+    </div>
+
+    <div id="teams-roster-mode">
+      <div class="teams-roster-board" id="teamsRosterBoard"></div>
+    </div>
+
+    <div id="teams-byrole-mode" style="display: none;">
+      <div class="casting-tracker-grid" id="teamsRoleGrid"></div>
     </div>
   </div>
 
@@ -2367,6 +2411,7 @@ function manageStatusHistory(charName, actorName) {
     renderPoolEditor();
     if (typeof renderHistory === 'function') renderHistory();
     if (typeof renderStats === 'function') renderStats();
+    if (typeof renderTeams === 'function' && document.getElementById('page-teams') && document.getElementById('page-teams').classList.contains('active')) renderTeams();
     showToast('등급·팀 이력 저장됨');
   });
   document.addEventListener('keydown', onKey);
@@ -5799,6 +5844,138 @@ $('#castingSearch').addEventListener('input', debounce(renderCastingTracker, 180
 $('#aliasShowCasting') && $('#aliasShowCasting').addEventListener('change', (e) => { state.aliasShow.casting = e.target.checked; saveState(); renderCastingTracker(); });
 $('#castingSort').addEventListener('change', renderCastingTracker);
 
+// ============ TEAMS (팀 관리 · read-only view + click-to-edit) ============
+// 현재 팀 편성을 한 화면에. 편집은 배우 클릭 → manageStatusHistory (기존 편집기 재사용).
+// 현재 스칼라값(meta.status/meta.team) 기준 = "지금 구조" 뷰. 회차별 값(statusForDate)이 아님.
+function teamsChipHtml(charName, actor, m) {
+  m = m || {};
+  const sub = m.subName ? ` <span class="sub-name">${escapeHtml(m.subName)}</span>` : '';
+  const st  = m.status ? ` <span class="status-badge ${statusBadgeClass(m.status)}">${escapeHtml(m.status)}</span>` : '';
+  const tm  = m.team   ? ` <span class="team-${m.team.toLowerCase()}">${escapeHtml(m.team)}</span>` : '';
+  const co  = (m.availability === 'Checked Out') ? ' <span class="avail-mark avail-checkedout">✱ CO</span>' : '';
+  const inactive = (m.availability === 'Checked Out') ? ' is-inactive' : '';
+  return `<span class="team-chip${inactive}" data-teams-char="${escapeHtml(charName)}" data-teams-actor="${escapeHtml(actor)}">${getActorDotHtml(actor)}${escapeHtml(actor)}${sub}${st}${tm}${co}</span>`;
+}
+
+function renderTeams() {
+  const term = ($('#teamsSearch') && $('#teamsSearch').value || '').toLowerCase().trim();
+  const activeBtn = $$('#teamsModeToggle button').find(b => b.classList.contains('active'));
+  const mode = activeBtn ? activeBtn.dataset.tmode : 'roster';
+  $('#teams-roster-mode').style.display = mode === 'roster' ? 'block' : 'none';
+  $('#teams-byrole-mode').style.display = mode === 'byrole' ? 'block' : 'none';
+
+  // 배역이 검색어에 걸리는가 (배역명/별칭/풀 배우명)
+  const charMatches = (c) => !term
+    || c.name.toLowerCase().includes(term)
+    || (c.aliases || []).some(al => al.toLowerCase().includes(term))
+    || c.actors.some(a => a.toLowerCase().includes(term));
+  // 배우가 검색어에 걸리는가 (배역이 이름으로 걸린 경우엔 배우 필터를 풀어 전체 표시)
+  const actorMatches = (charHit, actor) => !term || charHit || actor.toLowerCase().includes(term);
+
+  const chars = sortedCharacters().filter(charMatches);
+
+  if (mode === 'roster') {
+    const board = $('#teamsRosterBoard');
+    if (chars.length === 0) {
+      board.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--ink-faint); font-style: italic; grid-column: 1 / -1;">검색 결과 없음</div>';
+    } else {
+      const teams = [['Pink', 'pink'], ['Blue', 'blue']];
+      const cols = teams.map(([team, cls]) => {
+        let total = 0;
+        const rows = chars.map(c => {
+          const charHit = !term || c.name.toLowerCase().includes(term)
+            || (c.aliases || []).some(al => al.toLowerCase().includes(term));
+          const meta = c.actorMeta || {};
+          const regs = teamRegularCandidates(c.name, team).filter(a => actorMatches(charHit, a));
+          total += regs.length;
+          const cell = regs.length
+            ? `<div class="team-role-actors">${regs.map(a => teamsChipHtml(c.name, a, meta[a])).join('')}</div>`
+            : '<span class="team-empty">—</span>';
+          return `<div class="team-role-row"><span class="team-role-name">${escapeHtml(c.name)}</span>${cell}</div>`;
+        }).join('');
+        return `<div class="team-col ${cls}">
+          <div class="team-col-head"><span>${team} 팀</span><span class="tc-count">레귤러 ${total}</span></div>
+          ${rows}
+        </div>`;
+      }).join('');
+
+      // 스윙 풀: 배역별 status==='Swing' 배우
+      let swingTotal = 0;
+      const swingRows = chars.map(c => {
+        const charHit = !term || c.name.toLowerCase().includes(term)
+          || (c.aliases || []).some(al => al.toLowerCase().includes(term));
+        const meta = c.actorMeta || {};
+        const swings = c.actors.filter(a => (meta[a] || {}).status === 'Swing' && actorMatches(charHit, a));
+        if (!swings.length) return '';
+        swingTotal += swings.length;
+        return `<div class="team-role-row"><span class="team-role-name">${escapeHtml(c.name)}</span><div class="team-role-actors">${swings.map(a => teamsChipHtml(c.name, a, meta[a])).join('')}</div></div>`;
+      }).join('');
+      const swingSection = `<div class="teams-swing-section"><div class="team-col">
+        <div class="team-col-head"><span>스윙 풀 · Swing</span><span class="tc-count">${swingTotal}명</span></div>
+        ${swingRows || '<div style="padding: 12px 0; color: var(--ink-faint); font-style: italic;">지정된 스윙 없음</div>'}
+      </div></div>`;
+
+      board.innerHTML = cols + swingSection;
+    }
+  } else {
+    // 배역별: 배역 카드마다 Regular·Pink / Regular·Blue / Swing / 무등급 그룹
+    const grid = $('#teamsRoleGrid');
+    const teamRank = { 'Pink': 0, 'Blue': 1 };
+    const cards = chars.map(c => {
+      const charHit = !term || c.name.toLowerCase().includes(term)
+        || (c.aliases || []).some(al => al.toLowerCase().includes(term));
+      const meta = c.actorMeta || {};
+      const groups = { 'Regular·Pink': [], 'Regular·Blue': [], 'Swing': [], '무등급': [] };
+      c.actors.filter(a => actorMatches(charHit, a)).forEach(a => {
+        const m = meta[a] || {};
+        if (m.status === 'Regular') groups[m.team === 'Blue' ? 'Regular·Blue' : (m.team === 'Pink' ? 'Regular·Pink' : '무등급')].push(a);
+        else if (m.status === 'Swing') groups['Swing'].push(a);
+        else groups['무등급'].push(a);
+      });
+      // Regular 무팀은 '무등급' 대신 Swing 아래 별도? — 팀 없는 Regular는 드묾: 무등급 버킷에 둠(뱃지로 구분됨).
+      const sortBucket = (arr) => arr.sort((a, b) => {
+        const ma = meta[a] || {}, mb = meta[b] || {};
+        const ia = (ma.availability === 'Checked Out') ? 1 : 0;
+        const ib = (mb.availability === 'Checked Out') ? 1 : 0;
+        if (ia !== ib) return ia - ib;                       // Checked Out 뒤로
+        const ta = teamRank[ma.team] ?? 2, tb = teamRank[mb.team] ?? 2;
+        if (ta !== tb) return ta - tb;                       // Pink→Blue→none
+        return a.localeCompare(b);
+      });
+      const totalShown = Object.values(groups).reduce((n, g) => n + g.length, 0);
+      if (totalShown === 0) return '';
+      const body = Object.entries(groups).filter(([, arr]) => arr.length).map(([label, arr]) =>
+        `<div class="teams-role-group-label">${label} · ${arr.length}</div>
+         <div class="teams-role-group">${sortBucket(arr).map(a => teamsChipHtml(c.name, a, meta[a])).join('')}</div>`
+      ).join('');
+      return `<div class="character-card">
+        <div class="char-header">
+          <div><div class="char-name">${escapeHtml(c.name)}</div>${aliasNoteHtml(c.name, false)}</div>
+          <div class="char-stat">${totalShown}명</div>
+        </div>
+        ${body}
+      </div>`;
+    }).filter(Boolean).join('');
+    grid.innerHTML = cards || '<div style="padding: 40px; text-align: center; color: var(--ink-faint); font-style: italic; grid-column: 1 / -1;">검색 결과 없음</div>';
+  }
+
+  // 배우 칩 클릭 → 기존 편집기 (게스트 차단은 manageStatusHistory 내부 guardGuest)
+  $$('#page-teams .team-chip').forEach(el => {
+    el.addEventListener('click', () => manageStatusHistory(el.dataset.teamsChar, el.dataset.teamsActor));
+  });
+}
+
+// 모드 토글 (로스터 | 배역별)
+$$('#teamsModeToggle button').forEach(b => {
+  b.addEventListener('click', () => {
+    if (b.classList.contains('active')) return;
+    $$('#teamsModeToggle button').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    renderTeams();
+  });
+});
+$('#teamsSearch') && $('#teamsSearch').addEventListener('input', debounce(renderTeams, 180));
+
 // BULK EDITOR
 let bulkCurrentVisitId = null;
 let bulkCurrentCasting = {};
@@ -8373,6 +8550,7 @@ function renderActive(page) {
     else if (mode === 'bulk') renderBulkEditor();
     else if (mode === 'pool') renderPoolEditor();
   }
+  else if (page === 'teams') renderTeams();
   else if (page === 'scenes') renderScenePool();
   else if (page === 'pairing') populatePairingDropdowns();
   else if (page === 'performers') renderPerformers();
