@@ -731,6 +731,7 @@ body.app-loading::after { content: '동기화 중 · Loading…'; position: fixe
     <span class="nav-sep" aria-hidden="true"></span>
     <button class="tab" data-page="casting">캐스팅 · Casting</button>
     <button class="tab" data-page="teams">팀 관리 · Teams</button>
+    <button class="tab" data-page="review">시즌 결산 · Review</button>
     <button class="tab" data-page="scenes">장면 풀 · Scenes</button>
     <button class="tab" data-page="pairing">페어링 · Pairing</button>
     <button class="tab" data-page="performers">퍼포머 · Performers</button>
@@ -1073,6 +1074,23 @@ body.app-loading::after { content: '동기화 중 · Loading…'; position: fixe
     <div id="teams-byrole-mode" style="display: none;">
       <div class="casting-tracker-grid" id="teamsRoleGrid"></div>
     </div>
+  </div>
+
+  <div class="page" id="page-review">
+    <h2 class="section-title">Season Review</h2>
+    <div class="section-rule"><div class="line"></div><div class="ornament">✦</div><div class="line"></div></div>
+    <div class="casting-intro">시즌을 고르면, 그 시즌 동안 <b>한 번이라도</b> 각 배역의 팀별 Regular였던 배우 전체를 봅니다. 시즌 중 팀을 옮긴 배우는 양쪽 팀에 모두 표시됩니다. 배우를 클릭하면 등급·팀 이력을 편집합니다.</div>
+
+    <div class="history-controls" style="gap:8px; flex-wrap:wrap; align-items:center;">
+      <label style="font-family:var(--mono); font-size:10px; letter-spacing:0.12em; color:var(--ink-faint); text-transform:uppercase;">시즌</label>
+      <select id="reviewSeason" style="min-width:90px;"></select>
+    </div>
+
+    <div class="history-controls">
+      <input type="text" id="reviewSearch" placeholder="배역 또는 배우 검색…" style="flex: 1; min-width: 240px;">
+    </div>
+
+    <div class="teams-roster-board" id="reviewBoard"></div>
   </div>
 
   <div class="page" id="page-scenes">
@@ -2258,6 +2276,63 @@ function teamRegularsForDate(charName, team, date) {
   return ((c && c.actors) || []).filter(a =>
     statusForDate(charName, a, date) === 'Regular' &&
     teamForDate(charName, a, date) === team);
+}
+
+// 배우가 그 날짜에 '활동 중'이었는지 — 체크인/체크아웃 창(window) 기준. performerCheckins는 배우 단위 전역.
+// 게이트는 값이 있을 때만: checkIn 없으면 게이트 없음(레거시/미입력 배우가 사라지지 않게).
+// checkIn==날짜 → 포함(합류일 인정), checkOut==날짜 → 포함(마지막날 인정).
+function isActiveOnDate(actor, date) {
+  const c = (state.performerCheckins || {})[actor];
+  if (!c) return true;
+  const d = normalizeDateStr(date);
+  if (!d) return true;
+  if (c.checkIn  && d < normalizeDateStr(c.checkIn))  return false; // 합류 전
+  if (c.checkOut && d > normalizeDateStr(c.checkOut)) return false; // 퇴사 후
+  return true;
+}
+
+// 시즌 S 동안 '한 번이라도' 해당 배역의 Regular였던 배우를 팀별로. 팀 이동(Pink→Blue)은 양쪽 모두 집계.
+// 등급/팀은 step function(로그 경계에서만 변함)이라 breakpoint(로그 from + 시즌 start)만 샘플하면 충분.
+// 각 breakpoint에 체크인 게이트(isActiveOnDate) 적용 → 합류 전 Regular는 집계 안 됨.
+// return { Pink:[], Blue:[], NoTeam:[], SwingEver:[] } (배우명 정렬)
+function seasonRegularsByTeam(charName, seasonId) {
+  const out = { Pink: [], Blue: [], NoTeam: [], SwingEver: [] };
+  const range = seasonDateRange(seasonId);
+  if (!range) return out;
+  const [start, endRaw] = range;
+  const today = todayIso();
+  const end = endRaw !== null ? endRaw : (today >= start ? today : start); // 열린 마지막 시즌 = 오늘까지
+  const c = getCharacterByName(charName);
+  if (!c) return out;
+  const seen = {}; // actor -> { pink, blue, noTeamReg, swing }
+  (c.actors || []).forEach(a => {
+    const meta = (c.actorMeta || {})[a] || {};
+    const bps = new Set([start]);
+    (meta.statusLog || []).forEach(e => { const f = normalizeDateStr(e.from); if (f >= start && f <= end) bps.add(f); });
+    (meta.teamLog || []).forEach(e => { const f = normalizeDateStr(e.from); if (f >= start && f <= end) bps.add(f); });
+    const rec = { pink: false, blue: false, noTeamReg: false, swing: false };
+    bps.forEach(d => {
+      if (!isActiveOnDate(a, d)) return;                 // 체크인 창 밖의 breakpoint 무시
+      const st = statusForDate(charName, a, d);
+      const tm = teamForDate(charName, a, d);
+      if (st === 'Regular') {
+        if (tm === 'Pink') rec.pink = true;
+        else if (tm === 'Blue') rec.blue = true;
+        else rec.noTeamReg = true;                        // Regular인데 팀 없음
+      } else if (st === 'Swing') {
+        rec.swing = true;
+      }
+    });
+    if (rec.pink || rec.blue || rec.noTeamReg || rec.swing) seen[a] = rec;
+  });
+  Object.keys(seen).sort((x, y) => x.localeCompare(y)).forEach(a => {
+    const r = seen[a];
+    if (r.pink) out.Pink.push(a);
+    if (r.blue) out.Blue.push(a);
+    if (r.noTeamReg) out.NoTeam.push(a);
+    if (r.swing && !r.pink && !r.blue && !r.noTeamReg) out.SwingEver.push(a); // Regular로 안 잡힌 순수 스윙만
+  });
+  return out;
 }
 
 // Record a grade change into meta.statusLog with an effective date. Keeps the array sorted
@@ -6016,8 +6091,8 @@ function renderTeams() {
         const rows = chars.map(c => {
           const charHit = charHitOf(c);
           const meta = c.actorMeta || {};
-          // 날짜 기준: 그날 이 배역에서 team의 Regular였던 배우
-          const regs = teamRegularsForDate(c.name, team, date).filter(a => actorMatches(charHit, a));
+          // 날짜 기준: 그날 이 배역에서 team의 Regular였던 배우 (체크인 창 밖 배우 제외)
+          const regs = teamRegularsForDate(c.name, team, date).filter(a => isActiveOnDate(a, date) && actorMatches(charHit, a));
           total += regs.length;
           const cell = regs.length
             ? `<div class="team-role-actors">${regs.map(a => teamsChipHtml(c.name, a, meta[a], { status: 'Regular', team, hideCO: true })).join('')}</div>`
@@ -6035,7 +6110,7 @@ function renderTeams() {
       const swingRows = chars.map(c => {
         const charHit = charHitOf(c);
         const meta = c.actorMeta || {};
-        const swings = c.actors.filter(a => statusForDate(c.name, a, date) === 'Swing' && actorMatches(charHit, a));
+        const swings = c.actors.filter(a => statusForDate(c.name, a, date) === 'Swing' && isActiveOnDate(a, date) && actorMatches(charHit, a));
         if (!swings.length) return '';
         swingTotal += swings.length;
         return `<div class="team-role-row"><span class="team-role-name">${escapeHtml(c.name)}</span><div class="team-role-actors">${swings.map(a => teamsChipHtml(c.name, a, meta[a], { status: 'Swing', team: teamForDate(c.name, a, date), hideCO: true })).join('')}</div></div>`;
@@ -6057,6 +6132,7 @@ function renderTeams() {
       const resolved = {}; // actor -> { st, tm } (그날 등급/팀)
       const groups = { 'Regular·Pink': [], 'Regular·Blue': [], 'Swing': [], '무등급': [] };
       c.actors.filter(a => actorMatches(charHit, a)).forEach(a => {
+        if (!isActiveOnDate(a, date)) return;   // 그날 활동 중 아니면 어떤 버킷에도 안 넣음
         const st = statusForDate(c.name, a, date);
         const tm = teamForDate(c.name, a, date);
         resolved[a] = { st, tm };
@@ -6141,6 +6217,85 @@ $('#teamsSeason') && $('#teamsSeason').addEventListener('change', (e) => {
 $('#teamsDate') && $('#teamsDate').addEventListener('change', (e) => { teamsDate = e.target.value; renderTeams(); });
 $('#addNewSeason') && $('#addNewSeason').addEventListener('click', addSeasonFromUI);
 $('#delLastSeason') && $('#delLastSeason').addEventListener('click', deleteLastSeason);
+
+// ============ SEASON REVIEW (시즌 결산 · 그 시즌 레귤러였던 사람 전부) ============
+let reviewSeasonId = null;
+function populateReviewSeasonSelect() {
+  const sel = $('#reviewSeason'); if (!sel) return;
+  const ss = sortedSeasons();
+  sel.innerHTML = ss.map(s => `<option value="${escapeHtml(s.id)}">${escapeHtml(s.name)}</option>`).join('');
+  if (!ss.find(s => s.id === reviewSeasonId)) reviewSeasonId = ss.length ? ss[ss.length - 1].id : null; // 기본=최신 시즌
+  if (reviewSeasonId) sel.value = reviewSeasonId;
+}
+function renderReview() {
+  populateReviewSeasonSelect();
+  const board = $('#reviewBoard'); if (!board) return;
+  const emptyMsg = (msg) => `<div style="padding:40px; text-align:center; color:var(--ink-faint); font-style:italic; grid-column:1 / -1;">${msg}</div>`;
+  if (!reviewSeasonId) { board.innerHTML = emptyMsg('시즌이 없습니다.'); return; }
+
+  const term = ($('#reviewSearch') && $('#reviewSearch').value || '').toLowerCase().trim();
+  const charMatches = (c) => !term
+    || c.name.toLowerCase().includes(term)
+    || (c.aliases || []).some(al => al.toLowerCase().includes(term))
+    || c.actors.some(a => a.toLowerCase().includes(term));
+  const charHitOf = (c) => !term || c.name.toLowerCase().includes(term)
+    || (c.aliases || []).some(al => al.toLowerCase().includes(term));
+  const actorMatches = (charHit, actor) => !term || charHit || actor.toLowerCase().includes(term);
+
+  const chars = sortedCharacters().filter(charMatches);
+  if (chars.length === 0) { board.innerHTML = emptyMsg('검색 결과 없음'); return; }
+
+  // 배역당 한 번만 계산해 캐시 (Pink/Blue/NoTeam/SwingEver 컬럼이 재사용)
+  const bucketsByChar = new Map(chars.map(c => [c.name, seasonRegularsByTeam(c.name, reviewSeasonId)]));
+
+  const teams = [['Pink', 'pink'], ['Blue', 'blue']];
+  const cols = teams.map(([team, cls]) => {
+    let total = 0;
+    const rows = chars.map(c => {
+      const charHit = charHitOf(c);
+      const meta = c.actorMeta || {};
+      const regs = bucketsByChar.get(c.name)[team].filter(a => actorMatches(charHit, a));
+      total += regs.length;
+      const cell = regs.length
+        ? `<div class="team-role-actors">${regs.map(a => teamsChipHtml(c.name, a, meta[a], { status: 'Regular', team, hideCO: true })).join('')}</div>`
+        : '<span class="team-empty">—</span>';
+      return `<div class="team-role-row"><span class="team-role-name">${escapeHtml(c.name)}</span>${cell}</div>`;
+    }).join('');
+    return `<div class="team-col ${cls}">
+      <div class="team-col-head"><span>${team} 팀</span><span class="tc-count">레귤러 ${total}</span></div>
+      ${rows}
+    </div>`;
+  }).join('');
+
+  // 무팀 레귤러 + 그 시즌 스윙(옵션) — 하단 섹션 (teams-swing-section 재사용)
+  const extraSection = (bucketName, label, chipStatus) => {
+    let n = 0;
+    const rows = chars.map(c => {
+      const charHit = charHitOf(c);
+      const meta = c.actorMeta || {};
+      const list = bucketsByChar.get(c.name)[bucketName].filter(a => actorMatches(charHit, a));
+      if (!list.length) return '';
+      n += list.length;
+      return `<div class="team-role-row"><span class="team-role-name">${escapeHtml(c.name)}</span><div class="team-role-actors">${list.map(a => teamsChipHtml(c.name, a, meta[a], { status: chipStatus, team: '', hideCO: true })).join('')}</div></div>`;
+    }).join('');
+    if (!n) return '';
+    return `<div class="teams-swing-section"><div class="team-col">
+      <div class="team-col-head"><span>${label}</span><span class="tc-count">${n}명</span></div>
+      ${rows}
+    </div></div>`;
+  };
+
+  board.innerHTML = cols
+    + extraSection('NoTeam', '무팀 레귤러 · No Team', 'Regular')
+    + extraSection('SwingEver', '그 시즌 스윙 · Swing', 'Swing');
+
+  // 배우 칩 클릭 → 기존 편집기 (#page-review 스코프 별도 바인딩 필요)
+  $$('#page-review .team-chip').forEach(el => {
+    el.addEventListener('click', () => manageStatusHistory(el.dataset.teamsChar, el.dataset.teamsActor));
+  });
+}
+$('#reviewSeason') && $('#reviewSeason').addEventListener('change', (e) => { reviewSeasonId = e.target.value; renderReview(); });
+$('#reviewSearch') && $('#reviewSearch').addEventListener('input', debounce(renderReview, 180));
 
 // BULK EDITOR
 let bulkCurrentVisitId = null;
@@ -8717,6 +8872,7 @@ function renderActive(page) {
     else if (mode === 'pool') renderPoolEditor();
   }
   else if (page === 'teams') renderTeams();
+  else if (page === 'review') renderReview();
   else if (page === 'scenes') renderScenePool();
   else if (page === 'pairing') populatePairingDropdowns();
   else if (page === 'performers') renderPerformers();
