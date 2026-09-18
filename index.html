@@ -323,6 +323,8 @@ body.app-loading::after { content: '동기화 중 · Loading…'; position: fixe
 .team-chip.is-inactive { opacity: 0.5; }
 .team-chip .color-dot, .team-chip .chip-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
 .team-empty { color: var(--ink-faint); font-style: italic; font-family: var(--serif-display); }
+.team-assign-btn { display: inline-flex; align-items: center; margin: 2px 0 2px 6px; padding: 3px 9px; font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em; background: var(--paper-raised); color: var(--gold); border: 1px dashed var(--gold-dim); cursor: pointer; vertical-align: middle; }
+.team-assign-btn:hover { border-style: solid; }
 .teams-role-group-label { font-family: var(--mono); font-size: 9px; letter-spacing: 0.15em; text-transform: uppercase; color: var(--ink-faint); margin: 12px 0 6px; }
 .teams-role-group { display: flex; flex-wrap: wrap; gap: 6px; }
 
@@ -1084,6 +1086,7 @@ body.app-loading::after { content: '동기화 중 · Loading…'; position: fixe
     <div class="history-controls" style="gap:8px; flex-wrap:wrap; align-items:center;">
       <label style="font-family:var(--mono); font-size:10px; letter-spacing:0.12em; color:var(--ink-faint); text-transform:uppercase;">시즌</label>
       <select id="reviewSeason" style="min-width:90px;"></select>
+      <button id="finalizeSeasonRoster" type="button" class="admin-only mini-btn" style="margin-left:auto;">이 시즌 로스터 확정</button>
     </div>
 
     <div class="history-controls">
@@ -2340,6 +2343,97 @@ function seasonRegularsByTeam(charName, seasonId) {
   return out;
 }
 
+// ===== 팀 배치 UI 공유 헬퍼 (팀 관리 / 시즌 결산 탭의 + 배치 · 로스터 확정) =====
+// 시즌 앵커 배치의 적용 시작일: 배우 체크인일과 시즌 시작일 중 늦은 날(max). checkIn 없으면 시즌 시작일.
+function effectiveAssignFrom(actor, seasonStart) {
+  const start = normalizeDateStr(seasonStart);
+  const ci = ((state.performerCheckins || {})[actor] || {}).checkIn;
+  if (!ci) return start;
+  const c = normalizeDateStr(ci);
+  return c > start ? c : start;   // YYYY-MM-DD 문자열 비교로 max
+}
+// 한 배우를 특정 배역·팀의 Regular로 effective-dated 배치. record*가 baseline seed + dedup 처리.
+// 스칼라(meta.status/team)는 from이 최신 로그일 때만 갱신 → back-date가 더 최근 값을 덮지 않게.
+// 저장+푸시까지. 렌더/토스트는 호출측. admin 아니면 false.
+function assignRegularTeam(charName, actor, team, fromDate) {
+  if (!currentUserIsAdmin) return false;
+  const c = getCharacterByName(charName);
+  if (!c || !actor) return false;
+  const from = normalizeDateStr(fromDate);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from)) return false;
+  if (!c.actorMeta) c.actorMeta = {};
+  if (!c.actorMeta[actor]) c.actorMeta[actor] = {};
+  const meta = c.actorMeta[actor];
+  recordStatusChange(meta, 'Regular', from);
+  recordTeamChange(meta, team, from);
+  const newestStatusFrom = (meta.statusLog && meta.statusLog.length) ? meta.statusLog[meta.statusLog.length - 1].from : from;
+  const newestTeamFrom   = (meta.teamLog   && meta.teamLog.length)   ? meta.teamLog[meta.teamLog.length - 1].from   : from;
+  if (normalizeDateStr(newestStatusFrom) === from) meta.status = 'Regular';
+  if (normalizeDateStr(newestTeamFrom)   === from) meta.team = team;
+  saveState();
+  queueCharacterPush(charName, true);
+  return true;
+}
+// 배치 후보: 이 배역 풀에서 '이 팀의 Regular가 아직 아닌' 배우. Swing·타팀Regular·무팀·무등급 모두 포함.
+// opts.seasonId(Review) 또는 opts.date(Teams)로 현재 배치 상태 해석.
+function assignmentCandidates(charName, team, opts) {
+  const c = getCharacterByName(charName);
+  if (!c) return [];
+  const already = new Set();
+  if (opts.seasonId) {
+    (seasonRegularsByTeam(charName, opts.seasonId)[team] || []).forEach(a => already.add(a));
+  } else {
+    const d = opts.date;
+    (c.actors || []).forEach(a => {
+      if (statusForDate(charName, a, d) === 'Regular' && teamForDate(charName, a, d) === team) already.add(a);
+    });
+  }
+  return (c.actors || []).filter(a => !already.has(a)).sort((x, y) => x.localeCompare(y));
+}
+// + 배치 모달. opts = { date, from, rerender }(Teams) | { seasonId, seasonStart, rerender }(Review)
+function openAssignPicker(charName, team, opts) {
+  if (!currentUserIsAdmin) { showToast('관리자만 배치할 수 있습니다'); return; }
+  const cands = assignmentCandidates(charName, team, opts);
+  const teamKo = team === 'Pink' ? 'Pink' : 'Blue';
+  const back = document.createElement('div');
+  back.className = 'modal-backdrop open';
+  back.style.zIndex = '450';
+  const subHead = opts.from
+    ? `적용 시작일: <strong style="color:var(--gold);">${escapeHtml(opts.from)}</strong> 부터 Regular·${teamKo}`
+    : `시즌 시작일부터 (배우 체크인이 더 늦으면 체크인일부터) Regular·${teamKo}`;
+  const list = cands.length
+    ? cands.map(a => `<button type="button" class="btn ghost" data-pick="${escapeHtml(a)}" style="width:100%; justify-content:flex-start; text-align:left; margin:4px 0; padding:10px 14px;">${escapeHtml(a)}</button>`).join('')
+    : `<div style="color:var(--ink-faint); font-style:italic; padding:16px 0;">배치할 수 있는 배우가 없습니다 (풀의 모든 배우가 이미 ${teamKo} 팀 Regular).</div>`;
+  back.innerHTML = `
+    <div class="modal" style="max-width:420px;">
+      <h3 style="margin-bottom:4px;">${escapeHtml(charName)} · ${teamKo} 팀 배치</h3>
+      <div class="modal-sub">${subHead}</div>
+      <div style="max-height:46vh; overflow:auto; margin-top:12px;">${list}</div>
+      <div style="display:flex; justify-content:flex-end; margin-top:16px;">
+        <button type="button" class="btn ghost" style="width:auto; padding:10px 20px;" data-pick-cancel>닫기</button>
+      </div>
+      <div style="margin-top:10px; font-size:11px; color:var(--ink-faint); font-style:italic;">중간 시점 팀 이동은 배우 칩을 눌러 이력에서 편집하세요. 창 바깥/ESC = 닫기</div>
+    </div>`;
+  document.body.appendChild(back);
+  let done = false;
+  function close() { if (done) return; done = true; document.removeEventListener('keydown', onKey); back.remove(); }
+  function onKey(e) { if (e.key === 'Escape') close(); }
+  back.addEventListener('click', e => { if (e.target === back) close(); });
+  back.querySelector('[data-pick-cancel]').addEventListener('click', close);
+  back.querySelectorAll('[data-pick]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const actor = btn.dataset.pick;
+      const from = opts.from || effectiveAssignFrom(actor, opts.seasonStart);
+      if (assignRegularTeam(charName, actor, team, from)) {
+        showToast(`${actor} → ${teamKo} 팀 Regular (${from}~)`);
+        close();
+        if (typeof opts.rerender === 'function') opts.rerender();
+      }
+    });
+  });
+  document.addEventListener('keydown', onKey);
+}
+
 // Record a grade change into meta.statusLog with an effective date. Keeps the array sorted
 // ascending and de-duplicated by `from` (same-date re-edit replaces, never duplicates). On the
 // first edit, seeds a '0000-01-01' baseline of the PRIOR grade so records dated before `from`
@@ -2580,6 +2674,7 @@ function manageStatusHistory(charName, actorName) {
     if (typeof renderHistory === 'function') renderHistory();
     if (typeof renderStats === 'function') renderStats();
     if (typeof renderTeams === 'function' && document.getElementById('page-teams') && document.getElementById('page-teams').classList.contains('active')) renderTeams();
+    if (typeof renderReview === 'function' && document.getElementById('page-review') && document.getElementById('page-review').classList.contains('active')) renderReview();
     showToast('등급·팀 이력 저장됨');
   });
   document.addEventListener('keydown', onKey);
@@ -6099,10 +6194,11 @@ function renderTeams() {
           // 날짜 기준: 그날 이 배역에서 team의 Regular였던 배우 (체크인 창 밖 배우 제외)
           const regs = teamRegularsForDate(c.name, team, date).filter(a => isActiveOnDate(a, date) && actorMatches(charHit, a));
           total += regs.length;
-          const cell = regs.length
+          const chipHtml = regs.length
             ? `<div class="team-role-actors">${regs.map(a => teamsChipHtml(c.name, a, meta[a], { status: 'Regular', team, hideCO: true })).join('')}</div>`
             : '<span class="team-empty">—</span>';
-          return `<div class="team-role-row"><span class="team-role-name">${escapeHtml(c.name)}</span>${cell}</div>`;
+          const addBtn = `<button type="button" class="team-assign-btn admin-only" data-assign-char="${escapeHtml(c.name)}" data-assign-team="${team}">+ 배치</button>`;
+          return `<div class="team-role-row"><span class="team-role-name">${escapeHtml(c.name)}</span>${chipHtml}${addBtn}</div>`;
         }).join('');
         return `<div class="team-col ${cls}">
           <div class="team-col-head"><span>${team} 팀</span><span class="tc-count">레귤러 ${total}</span></div>
@@ -6170,6 +6266,15 @@ function renderTeams() {
   // 배우 칩 클릭 → 기존 편집기 (게스트 차단은 manageStatusHistory 내부 guardGuest)
   $$('#page-teams .team-chip').forEach(el => {
     el.addEventListener('click', () => manageStatusHistory(el.dataset.teamsChar, el.dataset.teamsActor));
+  });
+  // + 배치 버튼 → 그 배역 풀에서 배우 골라 선택 날짜부터 팀 Regular 배치 (admin)
+  $$('#page-teams .team-assign-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (!currentUserIsAdmin) return;
+      const from = teamsDate;
+      if (!from) { showToast('기준일이 없습니다'); return; }
+      openAssignPicker(btn.dataset.assignChar, btn.dataset.assignTeam, { date: teamsDate, from, rerender: renderTeams });
+    });
   });
 }
 
@@ -6261,10 +6366,11 @@ function renderReview() {
       const meta = c.actorMeta || {};
       const regs = bucketsByChar.get(c.name)[team].filter(a => actorMatches(charHit, a));
       total += regs.length;
-      const cell = regs.length
+      const chipHtml = regs.length
         ? `<div class="team-role-actors">${regs.map(a => teamsChipHtml(c.name, a, meta[a], { status: 'Regular', team, hideCO: true })).join('')}</div>`
         : '<span class="team-empty">—</span>';
-      return `<div class="team-role-row"><span class="team-role-name">${escapeHtml(c.name)}</span>${cell}</div>`;
+      const addBtn = `<button type="button" class="team-assign-btn admin-only" data-assign-char="${escapeHtml(c.name)}" data-assign-team="${team}">+ 배치</button>`;
+      return `<div class="team-role-row"><span class="team-role-name">${escapeHtml(c.name)}</span>${chipHtml}${addBtn}</div>`;
     }).join('');
     return `<div class="team-col ${cls}">
       <div class="team-col-head"><span>${team} 팀</span><span class="tc-count">레귤러 ${total}</span></div>
@@ -6298,9 +6404,61 @@ function renderReview() {
   $$('#page-review .team-chip').forEach(el => {
     el.addEventListener('click', () => manageStatusHistory(el.dataset.teamsChar, el.dataset.teamsActor));
   });
+  // + 배치 버튼 → 시즌 시작일(체크인 늦으면 체크인일)부터 팀 Regular 배치 (admin)
+  $$('#page-review .team-assign-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (!currentUserIsAdmin) return;
+      const range = seasonDateRange(reviewSeasonId);
+      if (!range) { showToast('시즌 정보가 없습니다'); return; }
+      openAssignPicker(btn.dataset.assignChar, btn.dataset.assignTeam, { seasonId: reviewSeasonId, seasonStart: range[0], rerender: renderReview });
+    });
+  });
 }
+
+// 이 시즌 로스터 확정: 화면 로스터(Pink/Blue Regular)를 시즌 시작일(체크인 늦으면 체크인일)부터 소급 배치.
+// 시즌 중간 팀이동자(Pink·Blue 양쪽에 뜨는 사람)는 이력 변형 방지 위해 제외 + 카운트.
+// from이 시즌 end를 넘으면(다음 시즌 침범) skip. 다른 시즌 경계는 안 건드림(record*가 해당 from만 upsert).
+function finalizeSeasonRoster(seasonId) {
+  if (!currentUserIsAdmin) { showToast('관리자만 확정할 수 있습니다'); return; }
+  const range = seasonDateRange(seasonId);
+  if (!range) { showToast('시즌 정보가 없습니다'); return; }
+  const seasonStart = range[0];
+  const seasonEnd = range[1]; // null이면 열린 시즌
+  const season = sortedSeasons().find(s => s.id === seasonId);
+
+  const jobs = []; let movers = 0; let skippedLate = 0;
+  sortedCharacters().forEach(c => {
+    const b = seasonRegularsByTeam(c.name, seasonId);
+    const pink = new Set(b.Pink || []);
+    const blue = new Set(b.Blue || []);
+    ['Pink', 'Blue'].forEach(team => {
+      (b[team] || []).forEach(actor => {
+        if (pink.has(actor) && blue.has(actor)) { return; } // 팀이동자 → 건너뜀 (아래서 카운트)
+        const from = effectiveAssignFrom(actor, seasonStart);
+        if (seasonEnd && from > seasonEnd) { skippedLate++; return; } // 시즌 밖 → skip
+        jobs.push({ char: c.name, actor, team, from });
+      });
+    });
+    // 팀이동자 카운트 (배역별 교집합)
+    [...pink].forEach(a => { if (blue.has(a)) movers++; });
+  });
+
+  if (!jobs.length && !movers) { showToast('확정할 로스터가 없습니다'); return; }
+  const msg = `시즌 "${season ? season.name : seasonId}" 로스터 확정\n`
+    + `${jobs.length}건을 시즌 시작일 기준으로 소급 적용합니다.`
+    + (movers ? `\n팀 이동자 ${movers}명은 제외됩니다(칩에서 직접 편집).` : '')
+    + (skippedLate ? `\n시즌 밖 체크인 ${skippedLate}명 제외.` : '')
+    + `\n(이미 반영된 배우는 변화 없음) 진행할까요?`;
+  if (!confirm(msg)) return;
+
+  jobs.forEach(j => assignRegularTeam(j.char, j.actor, j.team, j.from));
+  renderReview();
+  showToast(`로스터 확정 완료 — ${jobs.length}건 처리${movers ? `, ${movers}명 건너뜀` : ''}`);
+}
+
 $('#reviewSeason') && $('#reviewSeason').addEventListener('change', (e) => { reviewSeasonId = e.target.value; renderReview(); });
 $('#reviewSearch') && $('#reviewSearch').addEventListener('input', debounce(renderReview, 180));
+$('#finalizeSeasonRoster') && $('#finalizeSeasonRoster').addEventListener('click', () => finalizeSeasonRoster(reviewSeasonId));
 
 // BULK EDITOR
 let bulkCurrentVisitId = null;
