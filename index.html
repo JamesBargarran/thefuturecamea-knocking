@@ -2294,6 +2294,8 @@ function isActiveOnDate(actor, date) {
 // 시즌 S 동안 '한 번이라도' 해당 배역의 Regular였던 배우를 팀별로. 팀 이동(Pink→Blue)은 양쪽 모두 집계.
 // 등급/팀은 step function(로그 경계에서만 변함)이라 breakpoint(로그 from + 시즌 start)만 샘플하면 충분.
 // 각 breakpoint에 체크인 게이트(isActiveOnDate) 적용 → 합류 전 Regular는 집계 안 됨.
+// * 로그가 없는 배우(고정 스칼라)라도 체크인이 시즌 start보다 늦으면 start 샘플이 게이트로 걸러져
+//   통째로 사라짐 → 체크인 날짜가 시즌 범위 안이면 그것도 breakpoint에 넣어 실제 활동 시작 시점에서 샘플.
 // return { Pink:[], Blue:[], NoTeam:[], SwingEver:[] } (배우명 정렬)
 function seasonRegularsByTeam(charName, seasonId) {
   const out = { Pink: [], Blue: [], NoTeam: [], SwingEver: [] };
@@ -2310,6 +2312,9 @@ function seasonRegularsByTeam(charName, seasonId) {
     const bps = new Set([start]);
     (meta.statusLog || []).forEach(e => { const f = normalizeDateStr(e.from); if (f >= start && f <= end) bps.add(f); });
     (meta.teamLog || []).forEach(e => { const f = normalizeDateStr(e.from); if (f >= start && f <= end) bps.add(f); });
+    // 체크인일이 시즌 범위 안이면 breakpoint 추가 — start 샘플이 게이트로 걸러지는 케이스 방지.
+    const ci = ((state.performerCheckins || {})[a] || {}).checkIn;
+    if (ci) { const f = normalizeDateStr(ci); if (f >= start && f <= end) bps.add(f); }
     const rec = { pink: false, blue: false, noTeamReg: false, swing: false };
     bps.forEach(d => {
       if (!isActiveOnDate(a, d)) return;                 // 체크인 창 밖의 breakpoint 무시
