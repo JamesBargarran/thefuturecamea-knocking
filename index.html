@@ -3431,10 +3431,15 @@ function renderCastingInputs() {
 // character; returns { filled, skipped, ambiguous }. Single source for all three casting
 // editors (record / new-perf / bulk) so the rule and the reported counts never drift again
 // (previously the new-perf and bulk copies had dropped the 'skipped' count).
-function computeTeamFill(team, targetSlots) {
+function computeTeamFill(team, targetSlots, date) {
+  // date가 있으면 그 공연일 기준(시즌별 teamLog 반영)으로 후보를 뽑아 시즌 간 충돌을 방지.
+  // date 없으면 현재 스칼라값 기준(구 동작). 날짜 기준 시 체크인 창(isActiveOnDate)도 적용.
+  const d = date ? normalizeDateStr(date) : '';
   let filled = 0, skipped = 0; const ambiguous = [];
   state.characters.forEach(c => {
-    const cands = teamRegularCandidates(c.name, team);
+    const cands = d
+      ? teamRegularsForDate(c.name, team, d).filter(a => isActiveOnDate(a, d))
+      : teamRegularCandidates(c.name, team);
     if (cands.length === 1) { targetSlots[c.name] = [cands[0]]; filled++; }
     else if (cands.length === 0) skipped++;
     else ambiguous.push(c.name);
@@ -3448,7 +3453,9 @@ function teamFillToast(team, r) {
   showToast(msg);
 }
 function applyTeamBulkFill(team) {
-  const r = computeTeamFill(team, currentCastingSlots);
+  // 신규/편집 중인 회차의 날짜 기준으로 후보를 뽑아 시즌 간(지난시즌 레귤러) 충돌 방지.
+  const d = ($('#visitDate') && $('#visitDate').value) || '';
+  const r = computeTeamFill(team, currentCastingSlots, d);
   syncCurrentCasting();
   renderCastingInputs();
   teamFillToast(team, r);
@@ -5131,7 +5138,9 @@ $('#cancelNewPerf').addEventListener('click', () => {
 });
 
 function applyTeamBulkFillNewPerf(team) {
-  const r = computeTeamFill(team, newPerfReplacements);
+  // 새 공연 회차 폼의 날짜 기준 후보 선정 → 시즌 간 레귤러 충돌 방지.
+  const d = ($('#newPerfDate') && $('#newPerfDate').value) || '';
+  const r = computeTeamFill(team, newPerfReplacements, d);
   renderNewPerfCastingInputs();
   teamFillToast(team, r);
 }
@@ -6517,7 +6526,9 @@ function syncBulkCasting() {
   });
 }
 function applyTeamBulkFillBulk(team) {
-  const r = computeTeamFill(team, bulkCastingSlots);
+  // 편집 중인 회차의 날짜 기준 후보 선정 → 시즌 간 레귤러 충돌 방지.
+  const _v = state.visits.find(x => x.id === bulkCurrentVisitId);
+  const r = computeTeamFill(team, bulkCastingSlots, (_v && _v.date) || '');
   syncBulkCasting();
   renderBulkInputs();
   teamFillToast(team, r);
