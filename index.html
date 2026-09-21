@@ -246,6 +246,16 @@ h2.section-title { font-family: var(--serif-display); font-size: 36px; font-weig
 .casting-mode-toggle button.active { background: var(--ink); color: var(--paper); }
 .casting-mode-toggle button:hover:not(.active) { color: var(--ink); }
 
+/* 통계 기간 필터 — 세그먼트 토글(전체/시즌별/연도별/월별) + 보조 드롭다운 */
+.period-ctl { display: flex; gap: 12px; align-items: center; margin-bottom: 20px; flex-wrap: wrap; }
+.period-toggle { display: flex; gap: 0; border: 1px solid var(--rule); background: var(--paper-raised); width: fit-content; flex-wrap: wrap; }
+.period-toggle button { background: none; border: none; color: var(--ink-dim); font-family: var(--mono); font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; padding: 8px 16px; cursor: pointer; transition: all 0.2s; border-right: 1px solid var(--rule); }
+.period-toggle button:last-child { border-right: none; }
+.period-toggle button.active { background: var(--gold); color: var(--paper); }
+.period-toggle button:hover:not(.active) { color: var(--ink); }
+.period-ctl .period-value { background: var(--paper-deep); border: 1px solid var(--rule); color: var(--ink); font-family: var(--serif-body); padding: 8px 12px; font-size: 13px; }
+.period-ctl .period-value:focus { outline: none; border-color: var(--gold); }
+
 .casting-tracker-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 16px; }
 .character-card { background: var(--paper-raised); border: 1px solid var(--rule); padding: 20px; }
 .character-card .char-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--rule); }
@@ -931,7 +941,16 @@ body.app-loading::after { content: '동기화 중 · Loading…'; position: fixe
         <option value="prob">확률 높은 순</option>
         <option value="name">이름순</option>
       </select>
-      <select id="statsMonth"><option value="all">전체 기간</option></select>
+    </div>
+
+    <div class="period-ctl" id="statsPeriodCtl">
+      <div class="period-toggle">
+        <button class="active" data-ptype="all">전체</button>
+        <button data-ptype="season">시즌별</button>
+        <button data-ptype="year">연도별</button>
+        <button data-ptype="month">월별</button>
+      </div>
+      <select class="period-value" style="display:none;"></select>
     </div>
 
     <div class="actor-table">
@@ -962,6 +981,15 @@ body.app-loading::after { content: '동기화 중 · Loading…'; position: fixe
         <option value="incomplete">미완성(배우 남음)</option>
       </select>
     </div>
+    <div class="period-ctl" id="rolesPeriodCtl">
+      <div class="period-toggle">
+        <button class="active" data-ptype="all">전체</button>
+        <button data-ptype="season">시즌별</button>
+        <button data-ptype="year">연도별</button>
+        <button data-ptype="month">월별</button>
+      </div>
+      <select class="period-value" style="display:none;"></select>
+    </div>
     <div id="roleProgress"></div>
     <div class="role-grid" id="rolesList"></div>
   </div>
@@ -983,6 +1011,15 @@ body.app-loading::after { content: '동기화 중 · Loading…'; position: fixe
       <label style="display:flex; align-items:center; gap:6px; font-family:var(--mono); font-size:11px; color:var(--ink-dim); white-space:nowrap; cursor:pointer;">
         <input type="checkbox" id="interactionExcludeLegacy" checked> 레거시 제외
       </label>
+    </div>
+    <div class="period-ctl" id="ixPeriodCtl">
+      <div class="period-toggle">
+        <button class="active" data-ptype="all">전체</button>
+        <button data-ptype="season">시즌별</button>
+        <button data-ptype="year">연도별</button>
+        <button data-ptype="month">월별</button>
+      </div>
+      <select class="period-value" style="display:none;"></select>
     </div>
     <div id="interactionsList"></div>
   </div>
@@ -1433,12 +1470,16 @@ function defaultCharacters() {
   }));
 }
 
+// 시작일이 '그 날 이브닝부터'인 시즌 경계 (그 날 마티네는 이전 시즌). 이미 저장된 시즌 보정용 폴백.
+const SEASON_EVENING_STARTS = new Set(['2026-09-09']);
+
 // 시즌(캐스팅 사이클) 기본값. 시작일로 정의하며, 다음 시즌 시작 전날까지가 그 시즌 범위.
 // 마지막 시즌은 열려있음(open-ended). 사용자가 팀 탭에서 직접 추가/삭제 가능.
+// startEvening: true → 그 시작일의 마티네 공연은 이전 시즌, 이브닝부터 새 시즌(통계 경계 전용).
 function defaultSeasons() {
   return [
     { id: 'c1', name: 'C1', start: '2025-07-24' },
-    { id: 'c2', name: 'C2', start: '2026-09-09' }
+    { id: 'c2', name: 'C2', start: '2026-09-09', startEvening: true }
   ];
 }
 
@@ -1890,17 +1931,23 @@ function undoLast() {
 
 let lastSaveTime = 0;
 let _sceneActorCountsCache = null;
-function getSceneActorCounts() {
-  if (_sceneActorCountsCache) return _sceneActorCountsCache;
+// 장면별 배우 등장 횟수. period가 있으면 그 기간의 회차만 집계(무날짜·legacy 자동 제외).
+function computeSceneActorCounts(period) {
   const counts = {};
+  const scoped = !periodIsAll(period);
   state.visits.forEach(v => {
+    if (scoped && !visitInPeriod(v, period)) return;
     (v.entries || []).forEach(e => {
       if (!counts[e.sceneId]) counts[e.sceneId] = {};
       if (e.actor) counts[e.sceneId][e.actor] = (counts[e.sceneId][e.actor] || 0) + 1;
     });
   });
-  _sceneActorCountsCache = counts;
   return counts;
+}
+function getSceneActorCounts() {
+  if (_sceneActorCountsCache) return _sceneActorCountsCache;
+  _sceneActorCountsCache = computeSceneActorCounts(null);
+  return _sceneActorCountsCache;
 }
 
 let dataVersion = 0;
@@ -1935,6 +1982,8 @@ if (!state.performerCheckins) state.performerCheckins = {};
 if (!Array.isArray(state.hiddenPerformers)) state.hiddenPerformers = [];
 if (!Array.isArray(state.manualPerformers)) state.manualPerformers = [];
 if (!Array.isArray(state.seasons) || state.seasons.length === 0) state.seasons = defaultSeasons();
+// 이미 저장된 시즌에 startEvening 플래그가 없으면 알려진 이브닝-경계 시작일로 보정(통계 경계용, 저장/푸시 안 함).
+state.seasons.forEach(s => { if (s && s.startEvening === undefined && SEASON_EVENING_STARTS.has(normalizeDateStr(s.start))) s.startEvening = true; });
 if (!state.characters) state.characters = defaultCharacters();
 if (!state.scenes) state.scenes = defaultScenes();
 if (!state.aliasShow) state.aliasShow = { casting: true, roles: true, record: true }; // 탭별 별칭 표시 토글(기본 켜짐)
@@ -2256,6 +2305,31 @@ function seasonForDate(date) {
     if (normalizeDateStr(s.start) <= d) found = s; else break;
   }
   return found;
+}
+// 이 시즌이 '시작일 당일 이브닝부터'인가 — 명시 플래그 또는 알려진 이브닝-경계 시작일.
+// (원격 시즌 데이터가 startEvening 플래그 없이 통째로 교체돼도 경계가 유지되도록 이중 판정)
+function seasonStartsEvening(s) {
+  return !!s && (s.startEvening === true || SEASON_EVENING_STARTS.has(normalizeDateStr(s.start)));
+}
+// 한 회차(visit)가 속한 시즌 — 마티네/이브닝을 고려. legacy·무날짜는 null.
+// 이브닝-경계 시즌은 시작일 당일 '마티네'를 직전 시즌으로 넘긴다(그 날 이브닝부터 새 시즌).
+function seasonOfVisit(v) {
+  if (!v || v.isLegacy || !v.date) return null;
+  const d = normalizeDateStr(v.date);
+  const s = seasonForDate(d);
+  if (!s) return null;
+  if (seasonStartsEvening(s) && normalizeDateStr(s.start) === d && normalizeMatinee(v.matinee) === '마티네') {
+    const ss = sortedSeasons();
+    const i = ss.findIndex(x => x.id === s.id);
+    return i > 0 ? ss[i - 1] : null;
+  }
+  return s;
+}
+// 통계 기간용 시즌 라벨: "C2 (26.09.09 저녁~)"
+function seasonLabel(s) {
+  const st = normalizeDateStr(s.start);
+  const short = /^\d{4}-\d{2}-\d{2}$/.test(st) ? st.slice(2).replace(/-/g, '.') : st;
+  return `${s.name} (${short}${seasonStartsEvening(s) ? ' 저녁' : ''}~)`;
 }
 // 시즌 범위 내 공연 날짜(중복 제거·오름차순, legacy·무날짜 제외). 마지막 원소 = 그 시즌 최신일
 function datesInSeason(seasonId) {
@@ -3250,7 +3324,7 @@ function askDuplicate(label) {
 // ===== 마일스톤 알림 =====================================================
 // 최애(빨강 태그) ∪ 별표(워치리스트) 배우가 50단위 공연(50·100·150…)에
 // 근접하면(10회 전 / 1회 전) 또는 정확히 달성하는 순간 팝업으로 알림.
-// 카운트 = 배우별 all-time 공연 회차 수(perfCount 시맨틱, statsMonth 무관).
+// 카운트 = 배우별 all-time 공연 회차 수(perfCount 시맨틱, 통계 기간필터 무관).
 // dismissal은 localStorage 로컬 저장(Supabase 미사용).
 const MILESTONE_STEP = 50;
 const MILESTONE_DISMISS_KEY = STORAGE_KEY + '_milestones';
@@ -4245,7 +4319,73 @@ function fillMonthSelect(el, cur) {
   el.value = eff;
   return eff;
 }
-function inStatsMonth(v) { return statsMonth === 'all' || (v.date || '').startsWith(statsMonth); }
+// ===== 통계 기간 필터 엔진 — 전체 / 시즌별 / 연도별 / 월별 =====
+// period 객체: { type:'all' } | { type:'season', value:seasonId } | { type:'year', value:'YYYY' } | { type:'month', value:'YYYY-MM' }
+function periodIsAll(p) { return !p || p.type === 'all' || !p.value; }
+function periodKey(p) { return periodIsAll(p) ? 'all' : (p.type + ':' + p.value); }
+// 한 회차가 이 기간에 속하는가. 시즌은 마티네/이브닝 경계까지 반영(seasonOfVisit).
+function visitInPeriod(v, p) {
+  if (periodIsAll(p)) return true;
+  if (v.isLegacy || !v.date) return false;
+  const d = v.date || '';
+  if (p.type === 'month') return d.startsWith(p.value);
+  if (p.type === 'year') return d.startsWith(p.value + '-');
+  if (p.type === 'season') { const s = seasonOfVisit(v); return !!s && s.id === p.value; }
+  return true;
+}
+// 기간 라벨(표시용 칩) — 예: "· C2 (26.09.09 저녁~)"
+function periodBadge(p) {
+  if (periodIsAll(p)) return '';
+  if (p.type === 'season') { const s = (state.seasons || []).find(x => x.id === p.value); return s ? seasonLabel(s) : '시즌'; }
+  if (p.type === 'year') return p.value + '년';
+  if (p.type === 'month') { const q = p.value.split('-'); return `${q[0]}년 ${parseInt(q[1], 10)}월`; }
+  return '';
+}
+
+// 데이터가 있는 시즌/연도 목록(최신순) — 기간 드롭다운 옵션 소스
+function seasonsWithData() {
+  const has = {};
+  state.visits.forEach(v => { const s = seasonOfVisit(v); if (s) has[s.id] = true; });
+  return sortedSeasons().filter(s => has[s.id]).reverse().map(s => ({ value: s.id, label: seasonLabel(s) }));
+}
+function yearsWithData() {
+  const set = new Set();
+  state.visits.forEach(v => { if (!v.isLegacy && v.date && v.date.length >= 4) set.add(v.date.slice(0, 4)); });
+  return [...set].sort().reverse();
+}
+
+// 기간 선택 컨트롤 — 세그먼트 토글(전체/시즌별/연도별/월별) + 보조 드롭다운. onChange(period) 콜백.
+function makePeriodControl(rootId, onChange) {
+  const root = $('#' + rootId);
+  const noop = { get: () => ({ type: 'all' }), refresh: () => {} };
+  if (!root) return noop;
+  const sel = root.querySelector('.period-value');
+  const btns = [...root.querySelectorAll('.period-toggle button')];
+  let period = { type: 'all', value: '' };
+  const optionsFor = (type) => {
+    if (type === 'season') return seasonsWithData();
+    if (type === 'year') return yearsWithData().map(y => ({ value: y, label: y + '년' }));
+    if (type === 'month') return monthsWithData().map(m => { const q = m.split('-'); return { value: m, label: `${q[0]}년 ${parseInt(q[1], 10)}월` }; });
+    return [];
+  };
+  const get = () => (period.type === 'all' || !period.value) ? { type: 'all' } : { type: period.type, value: period.value };
+  function refresh() {
+    btns.forEach(b => b.classList.toggle('active', b.dataset.ptype === period.type));
+    if (period.type === 'all') { sel.style.display = 'none'; sel.innerHTML = ''; return; }
+    const opts = optionsFor(period.type);
+    sel.innerHTML = opts.map(o => `<option value="${escapeHtml(o.value)}">${escapeHtml(o.label)}</option>`).join('');
+    sel.style.display = opts.length ? '' : 'none';
+    if (!opts.some(o => o.value === period.value)) period.value = opts.length ? opts[0].value : '';
+    if (period.value) sel.value = period.value;
+  }
+  btns.forEach(b => b.addEventListener('click', () => { period = { type: b.dataset.ptype, value: '' }; refresh(); onChange(get()); }));
+  sel.addEventListener('change', () => { period.value = sel.value; onChange(get()); });
+  refresh();
+  return { get, refresh };
+}
+
+// 하위호환: 전역 statsPeriod 기준 회차 포함 여부(예전 inStatsMonth 대체)
+function inStatsPeriod(v) { return visitInPeriod(v, statsPeriod); }
 
 // ── Record 탭 회차선택 캘린더 (회차가 많을 때 드롭다운 대신 날짜로 고르기) ──
 function recordVisitsByDate() {
@@ -5281,12 +5421,12 @@ let _perfStatsCache = null, _perfStatsKey = null;
 function getPerformerStats(scope = 'performances') {
   // For each actor: { perfCount: number of visits they appeared in,
   //                   roleCount: { role: count of visits they did that role } }
-  const _psKey = scope + '|' + statsMonth + '|' + dataVersion;
+  const _psKey = scope + '|' + periodKey(statsPeriod) + '|' + dataVersion;
   if (_perfStatsCache && _perfStatsKey === _psKey) return _perfStatsCache;
   const stats = {};
   const visits = state.visits.filter(v => {
     if (v.isLegacy) return false;
-    if (!inStatsMonth(v)) return false;
+    if (!inStatsPeriod(v)) return false;
     if (scope === 'watched') return v.isWatched;
     return true;
   });
@@ -5314,7 +5454,7 @@ function getActorStats(filterType = 'all', scope = 'watched') {
   // matches the same population as the numerator (fixes Manderley/legacy mismatch).
   const countedVisits = state.visits.filter(v => {
     if (v.isLegacy) return false;
-    if (!inStatsMonth(v)) return false;
+    if (!inStatsPeriod(v)) return false;
     if (scope === 'watched') return !!v.isWatched;
     return true;
   });
@@ -5332,7 +5472,7 @@ function getActorStats(filterType = 'all', scope = 'watched') {
 }
 
 let statsScope = 'watched'; // 'watched' or 'performances'
-let statsMonth = 'all';     // 'YYYY-MM' period filter for stats, or 'all'
+let statsPeriod = { type: 'all' }; // 통계 기간: {type:'all'|'season'|'year'|'month', value}
 let statsView = 'performer'; // 'performer' or 'encounter'
 
 function inWatchlist(actor) { return (state.watchlist || []).includes(actor); }
@@ -5478,7 +5618,7 @@ function renderStatsCharts() {
 }
 
 function renderStats() {
-  statsMonth = fillMonthSelect($('#statsMonth'), statsMonth);
+  if (statsPeriodCtl) statsPeriodCtl.refresh();
   if ($('#statsCharts') && $('#statsCharts').style.display !== 'none') renderStatsCharts();
   if (statsView === 'performer') {
     renderPerformerStats();
@@ -5490,10 +5630,10 @@ function renderStats() {
 function renderPerformerStats() {
   const sort = $('#statsSort').value;
   const stats = getPerformerStats(statsScope);
-  const totalPerf = state.visits.filter(v => !v.isLegacy && inStatsMonth(v) && (statsScope !== 'watched' || v.isWatched)).length;
+  const totalPerf = state.visits.filter(v => !v.isLegacy && inStatsPeriod(v) && (statsScope !== 'watched' || v.isWatched)).length;
   // 표시용: '내 관극' scope + 전체 기간이면 홈 카운터(getWatchedCount)와 같은 정의로 통일(맨덜리 제외, legacy 포함).
   // 행별 출연률 분모는 totalPerf 그대로 유지 → 확률 왜곡 없음.
-  const totalPerfDisplay = (statsScope === 'watched' && statsMonth === 'all') ? getWatchedCount() : totalPerf;
+  const totalPerfDisplay = (statsScope === 'watched' && periodIsAll(statsPeriod)) ? getWatchedCount() : totalPerf;
 
   // Top stats: total perfs, unique performers, top performer
   const performerCount = Object.keys(stats).length;
@@ -5502,8 +5642,9 @@ function renderPerformerStats() {
   const totalAppearances = Object.values(stats).reduce((s, x) => s + x.perfCount, 0);
 
   const scopeLabel = statsScope === 'watched' ? '내 관극' : '전체 공연';
+  const pBadge = periodBadge(statsPeriod);
   $('#topStats').innerHTML = `
-    <div class="stat-card"><div class="stat-num">${totalPerfDisplay}</div><div class="stat-label">${scopeLabel}</div><div class="stat-detail">${statsScope === 'watched' ? '본 회차 수' : '전체 공연 회차'}</div></div>
+    <div class="stat-card"><div class="stat-num">${totalPerfDisplay}</div><div class="stat-label">${scopeLabel}${pBadge ? ' · ' + escapeHtml(pBadge) : ''}</div><div class="stat-detail">${statsScope === 'watched' ? '본 회차 수' : '전체 공연 회차'}</div></div>
     <div class="stat-card"><div class="stat-num">${performerCount}</div><div class="stat-label">Performers</div><div class="stat-detail">등장한 배우 수</div></div>
     <div class="stat-card"><div class="stat-num">${totalAppearances}</div><div class="stat-label">Appearances</div><div class="stat-detail">누적 출연 횟수</div></div>
     <div class="stat-card"><div class="stat-num">${topPerformer ? topPerformer[1].perfCount : 0}</div><div class="stat-label">Most Active</div><div class="stat-detail">${topPerformer ? escapeHtml(topPerformer[0]) : '—'}</div></div>
@@ -5582,7 +5723,7 @@ function renderEncounterStats() {
   const topActor = sorted[0];
   const avgPerVisit = totalViews ? (totalEncounters / totalViews).toFixed(2) : '—';
   // 표시용 '총 관극 횟수'는 홈 카운터와 같은 정의로 통일(맨덜리 제외). avgPerVisit 분모는 totalViews(인카운터 보유 회차) 유지.
-  const totalViewsDisplay = (statsScope === 'watched' && statsMonth === 'all') ? getWatchedCount() : totalViews;
+  const totalViewsDisplay = (statsScope === 'watched' && periodIsAll(statsPeriod)) ? getWatchedCount() : totalViews;
 
   $('#topStats').innerHTML = `
     <div class="stat-card"><div class="stat-num">${totalViewsDisplay}</div><div class="stat-label">Total Visits</div><div class="stat-detail">총 관극 횟수</div></div>
@@ -5660,7 +5801,8 @@ $('#chartToggle') && $('#chartToggle').addEventListener('click', () => {
   $('#chartToggle').textContent = open ? '📊 차트 접기' : '📊 차트 보기';
   if (open) renderStatsCharts();
 });
-$('#statsMonth') && $('#statsMonth').addEventListener('change', () => { statsMonth = $('#statsMonth').value; renderStats(); });
+// 기간 선택 컨트롤(전체/시즌별/연도별/월별) — 세그먼트 토글 + 보조 드롭다운
+const statsPeriodCtl = makePeriodControl('statsPeriodCtl', (p) => { statsPeriod = p; renderStats(); });
 $('#statsSearch') && $('#statsSearch').addEventListener('input', debounce(renderStats, 180));
 
 // Stats scope toggle (watched vs performances)
@@ -5683,13 +5825,16 @@ $('#statsView') && $('#statsView').addEventListener('change', (e) => {
 });
 
 // ============ ROLES ============
+let rolesPeriod = { type: 'all' }; // Roles 탭 기간 필터
 function renderRoles() {
+  if (rolesPeriodCtl) rolesPeriodCtl.refresh();
   const term = $('#roleSearch').value.toLowerCase().trim();
   const aliasCb = $('#aliasShowRoles'); if (aliasCb) aliasCb.checked = !!state.aliasShow.roles;
   const filterType = $('#roleType').value;
   const compFilter = $('#roleCompletion') ? $('#roleCompletion').value : 'all';
 
-  const sceneActorCounts = getSceneActorCounts();
+  // 기간 필터가 걸리면 그 기간의 회차만 집계(전체면 캐시된 all-time 사용).
+  const sceneActorCounts = periodIsAll(rolesPeriod) ? getSceneActorCounts() : computeSceneActorCounts(rolesPeriod);
   const seenOf = (s) => !!sceneActorCounts[s.id];   // scene experienced at all
   const perfStats = (s) => {   // 배역×퍼포머: pool actors experienced / pool size
     const pool = scenePool(s);
@@ -5773,9 +5918,12 @@ $('#roleSearch').addEventListener('input', debounce(renderRoles, 180));
 $('#aliasShowRoles') && $('#aliasShowRoles').addEventListener('change', (e) => { state.aliasShow.roles = e.target.checked; saveState(); renderRoles(); });
 $('#roleType').addEventListener('change', renderRoles);
 $('#roleCompletion') && $('#roleCompletion').addEventListener('change', renderRoles);
+const rolesPeriodCtl = makePeriodControl('rolesPeriodCtl', (p) => { rolesPeriod = p; renderRoles(); });
 
 // ============ INTERACTIONS ============
+let ixPeriod = { type: 'all' }; // 인터랙션 탭 기간 필터
 function renderInteractions() {
+  if (ixPeriodCtl) ixPeriodCtl.refresh();
   const term = $('#interactionSearch').value.toLowerCase().trim();
   const filterType = $('#interactionType').value;
   const excludeLegacy = $('#interactionExcludeLegacy').checked;
@@ -5797,6 +5945,7 @@ function renderInteractions() {
   const sceneMap = {};
   state.visits.forEach(v => {
     if (!v.isWatched) return;
+    if (!visitInPeriod(v, ixPeriod)) return;   // 기간 필터(전체/시즌별/연도별/월별)
     (v.entries || []).forEach(e => {
       if (!e.sceneId) return;
       if (!sceneMap[e.sceneId]) sceneMap[e.sceneId] = { occurrences: [] };
@@ -5911,6 +6060,7 @@ $('#interactionSearch').addEventListener('input', debounce(renderInteractions, 1
 $('#interactionActor') && $('#interactionActor').addEventListener('change', renderInteractions);
 $('#interactionType').addEventListener('change', renderInteractions);
 $('#interactionExcludeLegacy').addEventListener('change', renderInteractions);
+const ixPeriodCtl = makePeriodControl('ixPeriodCtl', (p) => { ixPeriod = p; renderInteractions(); });
 
 // ============ CASTING ============
 $$('.casting-mode-toggle button').forEach(b => {
@@ -7460,11 +7610,11 @@ function openActorModal(actor) {
   const charDates = {}; // char -> { debut, debutNum, latest, latestNum }
   const numMapForDebut = getVisitNumMap();
   // 맡은 배역/캐릭터 집계는 이 모달을 연 통계 행과 같은 회차 집합으로 한정한다.
-  // (내 관극 vs 전체 공연 + 월 필터 + legacy 제외 — getPerformerStats와 동일 조건)
+  // (내 관극 vs 전체 공연 + 기간 필터 + legacy 제외 — getPerformerStats와 동일 조건)
   // 이렇게 하지 않으면 행은 관극한 회차만, 모달은 전체 회차를 세어 회차 수가 어긋난다.
   const scopedVisits = state.visits.filter(v => {
     if (v.isLegacy) return false;
-    if (!inStatsMonth(v)) return false;
+    if (!inStatsPeriod(v)) return false;
     if (statsScope === 'watched') return v.isWatched;
     return true;
   });
@@ -9006,9 +9156,9 @@ function renderInsights() {
   const topMet = encEntries.slice().sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0];
 
   // rarest meeting: met performer with the lowest overall appearance rate (one-timers excluded)
-  const _sm = statsMonth; statsMonth = 'all';
+  const _sm = statsPeriod; statsPeriod = { type: 'all' };
   const globalStats = getPerformerStats('performances');
-  statsMonth = _sm;
+  statsPeriod = _sm;
   const totalPerf = getPerformanceCount() || 1;
   let rare = null, rareP = Infinity;
   encEntries.forEach(([name]) => {
