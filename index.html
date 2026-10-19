@@ -1939,7 +1939,8 @@ function computeSceneActorCounts(period) {
     if (scoped && !visitInPeriod(v, period)) return;
     (v.entries || []).forEach(e => {
       if (!counts[e.sceneId]) counts[e.sceneId] = {};
-      if (e.actor) counts[e.sceneId][e.actor] = (counts[e.sceneId][e.actor] || 0) + 1;
+      const a = entryActor(e, v);
+      if (a) counts[e.sceneId][a] = (counts[e.sceneId][a] || 0) + 1;
     });
   });
   return counts;
@@ -2138,7 +2139,7 @@ function getAllActors() {
   }));
   state.visits.forEach(v => {
     (v.entries || []).forEach(e => {
-      splitActorString(e.actor).forEach(p => set.add(p));
+      splitActorString(entryActor(e, v)).forEach(p => set.add(p));
     });
     Object.values(v.casting || {}).forEach(a => {
       castingActors(a).forEach(p => set.add(p));
@@ -2947,9 +2948,9 @@ const ROLE_KEYWORDS_TO_CHAR = {
   '바가란': 'J.Bargarran', '박제사': 'J.Bargarran',
   '풀튼': 'J.Fulton',
   '매트론': 'Matron Lang',
-  '크리스천 쇼': 'Nurse Christian Shaw', '쇼 너스': 'Nurse Christian Shaw', '간호사': 'Nurse Christian Shaw',
+  '크리스천 쇼': 'Nurse Christian Shaw', '쇼 너스': 'Nurse Christian Shaw', '간호사': 'Nurse Christian Shaw', '너스': 'Nurse Christian Shaw',
   '벨홉': 'The Bellhop', '벨보이': 'The Bellhop',
-  '6층': 'Sixth Floor Nurse', '식스': 'Sixth Floor Nurse',
+  '6층': 'Sixth Floor Nurse', '식스': 'Sixth Floor Nurse', 'Tiny Town': 'Sixth Floor Nurse', '타이니타운': 'Sixth Floor Nurse', '타이니': 'Sixth Floor Nurse',
   '맨인바': 'Man in Bar',
   '우먼인바': 'Woman in Bar', '바걸': 'Woman in Bar',
   '호스트': 'Host', '맨덜리바 술': 'Host',
@@ -3888,7 +3889,7 @@ function visitMatchesPairs(v, pairs) {
         const scene = getSceneById(e.sceneId);
         const roleName = (scene && scene.role) ? scene.role : '';
         if (!roleTextMatches(roleName, role)) continue;      // 정식명 OR 별칭 매칭
-        const actors = splitActorString(e.actor);
+        const actors = splitActorString(entryActor(e, v));
         if (actors.some(a => a.toLowerCase().includes(actor))) return true;
       }
     }
@@ -3922,8 +3923,9 @@ function renderManderley() {
       roleTextMatches(c, term) || a.toLowerCase().includes(term))) return true;   // 배역 별칭도 매칭
     return (v.entries || []).some(e => {
       const scene = getSceneById(e.sceneId);
+      const ea = entryActor(e, v);
       return (scene && roleTextMatches(scene.role, term)) ||                       // 배역 별칭도 매칭
-             (e.actor && e.actor.toLowerCase().includes(term));
+             (ea && ea.toLowerCase().includes(term));
     });
   });
 
@@ -3947,10 +3949,11 @@ function renderManderley() {
       : (v.entries || []).map((e, idx) => {
           const scene = getSceneById(e.sceneId);
           const roleName = scene ? scene.role : '(삭제된 장면)';
+          const ea = entryActor(e, v);
           return `<div class="visit-entry">
             <span class="role">${escapeHtml(roleName)}</span>
             <span class="actor" style="display:flex; align-items:center; gap:6px;">
-              <span class="actor-name-display">${getActorDotHtml(e.actor)}${escapeHtml(e.actor)}</span>
+              <span class="actor-name-display">${getActorDotHtml(ea)}${escapeHtml(ea)}</span>
               ${isEditing ? `<button class="mand-entry-del" data-vid="${escapeHtml(v.id)}" data-eidx="${idx}" style="background:none; border:1px solid var(--rule); color:var(--ink-faint); cursor:pointer; font-size:12px; padding:2px 7px; line-height:1;" title="이 항목 삭제">×</button>` : ''}
             </span>
           </div>`;
@@ -4622,7 +4625,7 @@ function renderHistory() {
     return v.entries.some(e => {
       const scene = getSceneById(e.sceneId);
       return (scene && roleTextMatches(scene.role, term)) ||                       // 배역 별칭도 매칭
-             e.actor.toLowerCase().includes(term);
+             entryActor(e, v).toLowerCase().includes(term);
     });
   });
 
@@ -4680,10 +4683,10 @@ function renderHistory() {
       const scene = getSceneById(e.sceneId);
       if (scene) {
         if (!grouped[scene.type]) grouped[scene.type] = [];
-        grouped[scene.type].push({ scene, actor: e.actor, idx });
+        grouped[scene.type].push({ scene, actor: entryActor(e, v), idx });
       } else {
         if (!grouped['기타']) grouped['기타'] = [];
-        grouped['기타'].push({ scene: { role: '(삭제된 장면)', type: '기타' }, actor: e.actor, idx });
+        grouped['기타'].push({ scene: { role: '(삭제된 장면)', type: '기타' }, actor: entryActor(e, v), idx });
       }
     });
 
@@ -5463,7 +5466,7 @@ function getActorStats(filterType = 'all', scope = 'watched') {
       const scene = getSceneById(e.sceneId);
       if (!scene) return;
       if (filterType !== 'all' && scene.type !== filterType) return;
-      const actors = e.actor.split(/\s*[X\/]\s*/).map(a => a.trim()).filter(Boolean);
+      const actors = entryActor(e, visit).split(/\s*[X\/]\s*/).map(a => a.trim()).filter(Boolean);
       actors.forEach(a => { counts[a] = (counts[a] || 0) + 1; });
     });
   });
@@ -5953,7 +5956,7 @@ function renderInteractions() {
         date: v.date || '',
         matinee: v.matinee || '',
         num: (numMap[v.id] != null ? numMap[v.id] : null),
-        actor: e.actor || '',
+        actor: entryActor(e, v),
         isLegacy: !!v.isLegacy
       });
     });
@@ -7591,7 +7594,7 @@ function openActorModal(actor) {
   const numMap = getVisitNumMap();
   state.visits.forEach(v => {
     v.entries.forEach(e => {
-      const actors = e.actor.split(/\s*[X\/]\s*/).map(a => a.trim());
+      const actors = entryActor(e, v).split(/\s*[X\/]\s*/).map(a => a.trim());
       if (actors.includes(actor)) {
         const scene = getSceneById(e.sceneId);
         encounters.push({ scene, when: v.isLegacy ? 'Legacy 시드' : `#${numMap[v.id]} · ${v.date || '날짜 없음'}` });
@@ -7686,7 +7689,7 @@ function openRoleModal(sceneId) {
   state.visits.forEach(v => {
     v.entries.forEach(e => {
       if (e.sceneId === sceneId) {
-        encounters.push({ actor: e.actor, when: v.isLegacy ? 'Legacy 시드' : `#${numMap[v.id]} · ${v.date || '날짜 없음'}` });
+        encounters.push({ actor: entryActor(e, v), when: v.isLegacy ? 'Legacy 시드' : `#${numMap[v.id]} · ${v.date || '날짜 없음'}` });
       }
     });
   });
@@ -7794,7 +7797,7 @@ function downloadEncountersTemplate() {
           idx === 0 ? (v.notes || '') : '',
           scene ? scene.type : '',
           scene ? scene.role : '',
-          e.actor
+          entryActor(e, v)
         ]);
       });
     }
@@ -8308,7 +8311,7 @@ $('#exportCSV').addEventListener('click', () => {
       const s = getSceneById(e.sceneId);
       rows.push([
         v.id, v.date || '', v.isLegacy ? 'LEGACY' : numMap[v.id],
-        s ? s.type : '', s ? s.role : '', e.actor, '', '', v.notes || '', v.isLegacy ? 'Y' : 'N'
+        s ? s.type : '', s ? s.role : '', entryActor(e, v), '', '', v.notes || '', v.isLegacy ? 'Y' : 'N'
       ]);
     });
     if (v.casting) {
@@ -8534,8 +8537,24 @@ function autoActorForScene(scene, visit) {
     const parts = chars.map(ch => casting[ch] || '');
     return parts.every(Boolean) ? parts.join(' X ') : '';
   }
+  // 키워드로 배역을 못 찾은 장면(예: 'Tiny Town', '너스' 처럼 role 텍스트가 특이한 경우):
+  // linkedChar가 걸려 있으면 그 배역의 캐스팅을 쓴다 (getSceneActorPool과 동일한 폴백).
+  if (scene.linkedChar && casting[scene.linkedChar]) return casting[scene.linkedChar];
   if (casting[scene.role]) return casting[scene.role];   // walkout: role == character
   return '';
+}
+
+// 표시·집계용 배우 리졸버: 기록(entry)에 저장된 배우가 있으면 그대로, 비어 있으면
+// 그 회차 캐스팅에서 되살린다. 과거에 '너스'·'Tiny Town'처럼 키워드 미등록 장면을
+// 빠른기록(대량 체크리스트/붙여넣기)으로 남기면 e.actor=''로 저장돼, 인터랙션 통계에서
+// 횟수만 세지고 배우 이름이 공란이던 문제를 — 저장된 원본을 건드리지 않고 — 표시 시점에 복구한다.
+// (관리자는 Record 탭에서 폴백 배우가 채워져 공란이 없었기에 유저에게만 보이던 증상의 교정)
+function entryActor(e, visit) {
+  if (!e) return '';
+  if (e.actor) return e.actor;
+  if (!visit) return '';
+  const scene = getSceneById(e.sceneId);
+  return scene ? autoActorForScene(scene, visit) : '';
 }
 
 function normalizeDateStr(d) {
@@ -8955,7 +8974,8 @@ function exportBulkWatchExcel() {
     const encs = (v.entries || []).map(e => {
       const sc = getSceneById(e.sceneId);
       const role = sc ? sc.role : '(삭제된 장면)';
-      return e.actor ? `${role} = ${e.actor}` : role;
+      const ea = entryActor(e, v);
+      return ea ? `${role} = ${ea}` : role;
     });
     rows.push([numMap[v.id], v.date || '', v.matinee || '', v.isWatched ? '관극' : '', encs.length, encs.join(' ; ')]);
   });
@@ -9145,7 +9165,7 @@ function renderInsights() {
   const encCount = {};
   let totalEnc = 0;
   wVisits.forEach(v => (v.entries || []).forEach(e => {
-    splitActorString(e.actor).forEach(a => {
+    splitActorString(entryActor(e, v)).forEach(a => {
       a = (a || '').trim();
       if (!a || ONE_TIMERS.has(a)) return;
       encCount[a] = (encCount[a] || 0) + 1; totalEnc++;
