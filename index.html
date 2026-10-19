@@ -1504,6 +1504,27 @@ function defaultScenes() {
   });
 }
 
+// 두 배역의 actorMeta를 배우 단위로 deep merge. 얕은 spread는 같은 배우가 양쪽에 있으면
+// 한쪽 meta를 통째로 버려 statusLog/teamLog(등급·팀 이력)를 잃는다 → 배우별로 합치고
+// 이력 로그는 비어있지 않은(또는 더 긴) 쪽을 보존한다. keepScalar='primary'면 스칼라는
+// primaryMeta 값을 우선(기존 호출부 의미 유지). 로그는 항상 둘 중 더 긴 쪽을 택한다.
+function deepMergeActorMeta(primaryMeta, otherMeta) {
+  const pm = primaryMeta || {}, om = otherMeta || {};
+  const out = {};
+  new Set([...Object.keys(pm), ...Object.keys(om)]).forEach(actor => {
+    const p = pm[actor] || {}, o = om[actor] || {};
+    const m = { ...o, ...p };                           // 스칼라: primary 우선, 없으면 other
+    ['statusLog', 'teamLog'].forEach(lk => {
+      const pl = Array.isArray(p[lk]) ? p[lk] : [];
+      const ol = Array.isArray(o[lk]) ? o[lk] : [];
+      const pick = pl.length >= ol.length ? pl : ol;     // 전환이 더 많은 쪽 보존
+      if (pick.length) m[lk] = pick; else delete m[lk];
+    });
+    out[actor] = m;
+  });
+  return out;
+}
+
 function reorderCharacters(chars) {
   const order = SEED_DATA.characterOrder || [];
   const orderIdx = {};
@@ -1523,7 +1544,9 @@ function reorderCharacters(chars) {
     const cur = byName.get(c.name);
     if (!cur) { byName.set(c.name, c); return; }
     cur.actors = [...new Set([...(cur.actors || []), ...(c.actors || [])])];
-    cur.actorMeta = { ...(c.actorMeta || {}), ...(cur.actorMeta || {}) }; // survivor 우선
+    // 배우 단위 deep merge(survivor 스칼라 우선 + 이력 로그 보존). 얕은 spread는 같은 배우가
+    // 양쪽에 있으면 한쪽 statusLog/teamLog를 통째로 버리는 버그가 있었다(중복 배역 병합 시 이력 소실).
+    cur.actorMeta = deepMergeActorMeta(cur.actorMeta, c.actorMeta);
     if ((c.aliases && c.aliases.length) || (cur.aliases && cur.aliases.length)) {
       cur.aliases = [...new Set([...(cur.aliases || []), ...(c.aliases || [])])];
     }
@@ -4156,7 +4179,8 @@ function mergeCharacter(fromChar, toChar) {
     const toC = state.characters.find(c => c.name === toChar);
     if (toC) {
       toC.actors = [...new Set([...(toC.actors || []), ...(fromC.actors || [])])];
-      toC.actorMeta = { ...(fromC.actorMeta || {}), ...(toC.actorMeta || {}) }; // to 우선
+      // to(primary) 스칼라 우선 + 양쪽 배우의 등급·팀 이력 보존(얕은 병합 시 겹치는 배우 이력 소실 버그 수정)
+      toC.actorMeta = deepMergeActorMeta(toC.actorMeta, fromC.actorMeta);
       state.characters.splice(fromIdx, 1);
       queueCharacterPush(toC.name, true);
       queueCharacterPush(fromChar, true); // state에서 사라짐 → characters 테이블 행 삭제
