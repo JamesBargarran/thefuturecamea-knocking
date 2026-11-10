@@ -53,10 +53,15 @@ header { border-bottom: 1px solid var(--rule); padding-bottom: 24px; margin-bott
 .counter-num { font-size: 72px; font-weight: 300; line-height: 1; color: var(--ink); font-style: italic; }
 .counter-label { font-family: var(--mono); font-size: 10px; letter-spacing: 0.3em; color: var(--gold); text-transform: uppercase; margin-top: 6px; }
 
+.nav-groups { display: flex; gap: 6px; margin: 0 0 2px; flex-wrap: wrap; }
+.group-tab { background: none; border: 1px solid transparent; color: var(--ink-faint); font-family: var(--mono); font-size: 12px; letter-spacing: 0.18em; text-transform: uppercase; padding: 9px 18px; cursor: pointer; transition: color 0.2s, border-color 0.2s; font-weight: 500; }
+.group-tab:hover { color: var(--ink); }
+.group-tab.active { color: var(--gold); border-color: var(--gold-dim); background: rgba(184, 155, 94, 0.08); }
 nav { display: flex; gap: 0; margin-bottom: 40px; border-bottom: 1px solid var(--rule); flex-wrap: wrap; }
 .tab { background: none; border: none; color: var(--ink-dim); font-family: var(--mono); font-size: 11px; letter-spacing: 0.24em; text-transform: uppercase; padding: 16px 24px; cursor: pointer; position: relative; transition: color 0.2s; font-weight: 400; }
 .tab:hover { color: var(--ink); }
 .tab.active { color: var(--ink); }
+.tab.tab-hidden { display: none; }
 .visit-cal { background: var(--paper-raised); border: 1px solid var(--rule); padding: 14px 16px; margin-bottom: 20px; }
 .cal-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
 .cal-title { font-family: var(--serif-display); font-size: 17px; font-style: italic; color: var(--ink); }
@@ -89,7 +94,6 @@ nav { display: flex; gap: 0; margin-bottom: 40px; border-bottom: 1px solid var(-
 .rec-cal-chip { background: transparent; border: 1px solid var(--gold-dim); color: var(--ink-dim); font-family: var(--mono); font-size: 10px; letter-spacing: 0.06em; padding: 5px 10px; cursor: pointer; border-radius: 3px; transition: all 0.15s; }
 .rec-cal-chip:hover { background: rgba(184, 155, 94, 0.15); color: var(--ink); }
 .rec-cal-chip.active { background: var(--blood-bright); border-color: var(--blood-bright); color: #fff; }
-.nav-sep { align-self: center; width: 1px; height: 16px; background: var(--rule); margin: 0 4px; flex-shrink: 0; pointer-events: none; }
 .tab.active::after { content: ''; position: absolute; bottom: -1px; left: 24px; right: 24px; height: 1px; background: var(--blood-bright); }
 
 .page { display: none; }
@@ -609,23 +613,24 @@ body.app-loading::after { content: '동기화 중 · Loading…'; position: fixe
   /* Performer pool on tablets: allow narrower cards but keep date inputs contained */
   .pool-editor-list { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
   /* Tabs: horizontal scroll instead of wrapping into many rows on tablets/laptops */
-  nav { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
-  nav::-webkit-scrollbar { display: none; }
-  .tab { white-space: nowrap; flex-shrink: 0; }
+  nav, .nav-groups { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+  nav::-webkit-scrollbar, .nav-groups::-webkit-scrollbar { display: none; }
+  .tab, .group-tab { white-space: nowrap; flex-shrink: 0; }
 }
 
 /* ===== TABLET / NARROW (≤600px) ===== */
 @media (max-width: 600px) {
   .container { padding: 16px 14px 64px; }
   /* Tabs: compact, horizontally scrollable instead of wrapping into many rows */
-  nav {
+  nav, .nav-groups {
     flex-wrap: nowrap;
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
     margin-bottom: 28px;
   }
-  nav::-webkit-scrollbar { display: none; }
+  .nav-groups { margin-bottom: 8px; }
+  nav::-webkit-scrollbar, .nav-groups::-webkit-scrollbar { display: none; }
   .tab {
     padding: 12px 14px;
     font-size: 11px;
@@ -633,6 +638,7 @@ body.app-loading::after { content: '동기화 중 · Loading…'; position: fixe
     white-space: nowrap;
     flex-shrink: 0;
   }
+  .group-tab { padding: 8px 12px; font-size: 11px; letter-spacing: 0.1em; white-space: nowrap; flex-shrink: 0; }
   /* Casting inputs stack to single column for easy tapping */
   .casting-grid { grid-template-columns: 1fr; gap: 8px; }
   /* Performer pool: single column so date inputs never overflow on tablets/phones */
@@ -728,10 +734,8 @@ body.app-loading::after { content: '동기화 중 · Loading…'; position: fixe
 .user-chip button { background: transparent; border: 1px solid var(--rule); color: var(--ink-faint); font-family: var(--mono); font-size: 10px; padding: 3px 8px; cursor: pointer; letter-spacing: 0.15em; }
 
 /* ===== 캐스팅보드 · Casting Board (이미지 보드) ===== */
-.board-controls { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; margin-bottom: 22px; }
-.board-pick { display: flex; align-items: center; gap: 10px; }
-.board-pick-label { font-family: var(--mono); font-size: 10px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--gold); }
-#boardVisitSelect { background: var(--paper-raised); color: var(--ink); border: 1px solid var(--rule); font-family: var(--serif-body); font-size: 14px; padding: 7px 12px; min-width: 230px; max-width: 70vw; }
+.board-controls { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; margin-bottom: 18px; }
+.board-calendar { background: var(--paper-raised); border: 1px solid var(--rule); padding: 12px 14px; width: 320px; max-width: 100%; }
 .board-meta { font-family: var(--mono); font-size: 11px; letter-spacing: 0.14em; color: var(--ink-dim); }
 .board-empty { padding: 60px 20px; text-align: center; color: var(--ink-faint); font-style: italic; }
 
@@ -743,53 +747,69 @@ body.app-loading::after { content: '동기화 중 · Loading…'; position: fixe
     linear-gradient(180deg, #171310 0%, #0e0b08 100%);
   border: 1px solid var(--gold-dim);
   box-shadow: inset 0 0 0 6px rgba(10,8,6,0.92), inset 0 0 0 7px rgba(184,155,94,0.22), 0 24px 60px rgba(0,0,0,0.55);
-  padding: 42px 38px 48px;
+  padding: 26px 30px 32px;
 }
 .board-sheet::before { content: ''; position: absolute; inset: 14px; border: 1px solid rgba(184,155,94,0.20); pointer-events: none; }
-.board-header { text-align: center; margin-bottom: 36px; position: relative; }
-.board-header .board-sub { font-family: var(--mono); font-size: 10px; letter-spacing: 0.38em; text-transform: uppercase; color: var(--gold); }
-.board-title { font-family: var(--serif-display); font-style: italic; font-weight: 500; font-size: 52px; line-height: 1; letter-spacing: 0.02em; color: var(--ink); margin: 10px 0 9px; text-shadow: 0 2px 22px rgba(184,155,94,0.20); }
+.board-header { text-align: center; margin-bottom: 20px; position: relative; }
+.board-header .board-sub { font-family: var(--mono); font-size: 9px; letter-spacing: 0.38em; text-transform: uppercase; color: var(--gold); }
+.board-title { font-family: var(--serif-display); font-style: italic; font-weight: 500; font-size: 34px; line-height: 1; letter-spacing: 0.02em; color: var(--ink); margin: 7px 0 6px; text-shadow: 0 2px 22px rgba(184,155,94,0.20); }
 .board-sub2 { color: var(--ink-faint); letter-spacing: 0.5em; }
+/* 보드 로고 락업: THE McKITHAN HOTEL + 우측 정렬 EST.1939 (name엔 uppercase 변환 금지 — 'Mc'의 소문자 c 보존) */
+.board-logo { display: inline-block; text-align: right; margin-bottom: 14px; line-height: 1; }
+.board-logo-name { font-family: var(--mono); font-size: 12px; letter-spacing: 0.34em; color: var(--gold); }
+/* 'Mc'의 c를 살짝 올려 밑줄 — 전통적 Mac/Mc 약물 표기 */
+.board-logo-name .mc-c { font-size: 0.72em; vertical-align: 0.34em; letter-spacing: 0; text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 1.5px; margin: 0 0.02em; }
+.board-logo-est { font-family: var(--mono); font-size: 8px; letter-spacing: 0.4em; text-transform: uppercase; color: var(--ink-faint); margin-top: 6px; }
 
-.board-stage { display: flex; flex-direction: column; gap: 32px; }
-.board-faction-head { display: flex; align-items: center; gap: 16px; margin-bottom: 20px; }
+/* 하우스를 역할 수에 비례한 너비의 액자 패널로 배치(justified) — 큰 포트레이트가
+   틈 없이 꽉 차게. flex-grow가 각 행의 남는 폭을 채워 공백을 없앤다.
+   하우스별 flex/min-width는 renderCastingBoard에서 역할 수에 맞춰 인라인으로 지정. */
+/* align-items:stretch → 같은 행의 하우스 박스들이 동일 높이(하단 라인 정렬) */
+.board-stage { display: flex; flex-wrap: wrap; gap: 14px; align-items: stretch; justify-content: center; }
+.board-faction { display: flex; flex-direction: column; border: 1px solid rgba(184,155,94,0.28); background: rgba(10,8,6,0.32); padding: 11px 11px 13px; }
+.board-faction-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
 .bf-line { flex: 1; height: 1px; background: linear-gradient(90deg, transparent, var(--gold-dim), transparent); }
-.bf-titles { display: flex; flex-direction: column; align-items: center; gap: 3px; white-space: nowrap; }
-.bf-kr { font-family: var(--serif-display); font-style: italic; font-size: 23px; color: var(--gold); letter-spacing: 0.04em; }
-.bf-en { font-family: var(--mono); font-size: 9px; letter-spacing: 0.34em; text-transform: uppercase; color: var(--ink-faint); }
+.bf-titles { display: flex; flex-direction: column; align-items: center; gap: 2px; white-space: nowrap; }
+.bf-kr { font-family: var(--serif-display); font-style: italic; font-size: 19px; color: var(--gold); letter-spacing: 0.04em; }
+.bf-en { font-family: var(--mono); font-size: 8px; letter-spacing: 0.3em; text-transform: uppercase; color: var(--ink-faint); }
 
-.board-roles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 170px)); gap: 26px 20px; justify-content: center; }
-.board-role { display: flex; flex-direction: column; align-items: center; text-align: center; }
+.board-roles { display: flex; gap: 5px; align-items: flex-start; }
+.board-role { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: center; text-align: center; }
 .board-portrait {
-  display: block; width: 124px; height: 156px; overflow: hidden; cursor: pointer; position: relative;
+  display: block; width: 100%; aspect-ratio: 4 / 5; overflow: hidden; cursor: pointer; position: relative;
   border: 1px solid var(--gold-dim);
-  box-shadow: inset 0 0 0 3px rgba(10,8,6,0.85), 0 8px 20px rgba(0,0,0,0.5);
+  box-shadow: inset 0 0 0 2px rgba(10,8,6,0.85), 0 6px 16px rgba(0,0,0,0.5);
   background: linear-gradient(180deg, #201a14, #0d0a08);
   transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
 }
 .board-portrait img { width: 100%; height: 100%; object-fit: cover; object-position: center top; display: block; filter: grayscale(0.22) contrast(1.03) brightness(0.98); }
-.board-portrait .avatar-fill { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-family: var(--serif-display); font-size: 42px; color: var(--gold-dim); background: linear-gradient(180deg, #241d16, #0d0a08); }
-.board-portrait::after { content: ''; position: absolute; inset: 0; box-shadow: inset 0 -42px 42px -22px rgba(0,0,0,0.65); pointer-events: none; }
+.board-portrait .avatar-fill { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-family: var(--serif-display); font-size: 34px; color: var(--gold-dim); background: linear-gradient(180deg, #241d16, #0d0a08); }
+.board-portrait::after { content: ''; position: absolute; inset: 0; background: linear-gradient(to top, rgba(0,0,0,0.60), transparent 42%); pointer-events: none; }
 .board-portrait:hover { transform: translateY(-3px); border-color: var(--gold); box-shadow: inset 0 0 0 3px rgba(10,8,6,0.85), 0 14px 32px rgba(0,0,0,0.6); }
 .board-portrait-empty { display: flex; align-items: center; justify-content: center; cursor: default; }
-.board-portrait-empty .bp-empty { font-family: var(--serif-display); font-size: 36px; color: var(--rule); }
-.board-portrait-empty:hover { transform: none; border-color: var(--gold-dim); box-shadow: inset 0 0 0 3px rgba(10,8,6,0.85), 0 8px 20px rgba(0,0,0,0.5); }
+.board-portrait-empty .bp-empty { font-family: var(--serif-display); font-size: 34px; color: var(--rule); }
+.board-portrait-empty:hover { transform: none; border-color: var(--gold-dim); box-shadow: inset 0 0 0 2px rgba(10,8,6,0.85), 0 6px 14px rgba(0,0,0,0.5); }
 
-.board-role-label { margin-top: 12px; font-family: var(--serif-display); font-style: italic; font-size: 18px; color: var(--ink); cursor: pointer; line-height: 1.15; }
+.board-role-label { margin-top: 8px; font-family: var(--serif-display); font-style: italic; font-size: 14px; color: var(--ink); cursor: pointer; line-height: 1.12; }
 .board-role-label:hover { color: var(--gold); }
-.brl-sub { display: block; font-family: var(--mono); font-style: normal; font-size: 8.5px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--ink-faint); margin-top: 3px; }
-.board-actor { display: flex; flex-direction: column; gap: 1px; margin-top: 6px; }
-.ba-ko { font-family: var(--serif-body); font-size: 13px; color: var(--ink-dim); }
-.ba-en { font-family: var(--mono); font-size: 9px; letter-spacing: 0.13em; text-transform: uppercase; color: var(--gold-dim); }
-.ba-empty { font-family: var(--mono); font-size: 9px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--rule); }
-.board-actor-extra { font-family: var(--mono); font-size: 8.5px; letter-spacing: 0.1em; color: var(--ink-faint); margin-top: 3px; }
+.brl-sub { display: block; font-family: var(--mono); font-style: normal; font-size: 8px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink-faint); margin-top: 2px; }
+.board-actor { display: flex; flex-direction: column; gap: 1px; margin-top: 4px; }
+.ba-ko { font-family: var(--serif-body); font-size: 12px; color: var(--ink-dim); line-height: 1.2; }
+.ba-en { font-family: var(--mono); font-size: 8px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--gold-dim); line-height: 1.3; }
+.ba-empty { font-family: var(--mono); font-size: 8px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--rule); }
+.board-actor-extra { font-family: var(--mono); font-size: 8px; letter-spacing: 0.08em; color: var(--ink-faint); margin-top: 2px; }
 
+@media (max-width: 760px) {
+  /* 좁은 화면: 하우스를 한 줄 전체로 펴서 포트레이트가 과하게 작아지지 않게 */
+  .board-faction { flex-basis: 100% !important; min-width: 0 !important; }
+}
 @media (max-width: 640px) {
-  .board-title { font-size: 38px; }
-  .board-sheet { padding: 26px 14px 30px; }
-  .board-roles { grid-template-columns: repeat(auto-fit, minmax(104px, 1fr)); gap: 18px 12px; }
-  .board-portrait { width: 98px; height: 124px; }
-  .bf-kr { font-size: 19px; }
+  .board-title { font-size: 30px; }
+  .board-sheet { padding: 20px 12px 24px; }
+  .board-stage { gap: 12px; }
+  .board-roles { gap: 4px; }
+  .bf-kr { font-size: 16px; }
+  .board-calendar { width: 100%; }
 }
 </style>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -840,26 +860,30 @@ body.app-loading::after { content: '동기화 중 · Loading…'; position: fixe
     </div>
   </header>
 
+  <div class="nav-groups">
+    <button class="group-tab active" data-group="record">기록 · Record</button>
+    <button class="group-tab" data-group="stats">분석 · Stats</button>
+    <button class="group-tab" data-group="casting">캐스팅 · Casting</button>
+    <button class="group-tab" data-group="cast">배우 · Performers</button>
+    <button class="group-tab" data-group="data">데이터 · Archive</button>
+  </div>
   <nav>
-    <button class="tab active" data-page="record">기록 · Record</button>
-    <button class="tab" data-page="history">회차 · Visits</button>
-    <button class="tab" data-page="manderley">맨덜리 · Manderley</button>
-    <span class="nav-sep" aria-hidden="true"></span>
-    <button class="tab" data-page="stats">통계 · Cast</button>
-    <button class="tab" data-page="roles">배역 · Roles</button>
-    <button class="tab" data-page="interactions">인터랙션 통계 · Interactions</button>
-    <span class="nav-sep" aria-hidden="true"></span>
-    <button class="tab" data-page="casting">캐스팅 · Casting</button>
-    <button class="tab" data-page="teams">팀 관리 · Teams</button>
-    <button class="tab" data-page="review">시즌 결산 · Review</button>
-    <button class="tab" data-page="scenes">장면 풀 · Scenes</button>
-    <button class="tab" data-page="pairing">페어링 · Pairing</button>
-    <button class="tab" data-page="performers">퍼포머 · Performers</button>
-    <button class="tab" data-page="favorites">색상 · Tags</button>
-    <button class="tab" data-page="myfaves">최애 · Faves</button>
-    <button class="tab" data-page="board">캐스팅보드 · Board</button>
-    <span class="nav-sep" aria-hidden="true"></span>
-    <button class="tab" data-page="data">데이터 · Archive</button>
+    <button class="tab active" data-page="record" data-group="record">기록 · Record</button>
+    <button class="tab" data-page="history" data-group="record">회차 · Visits</button>
+    <button class="tab" data-page="manderley" data-group="record">맨덜리 · Manderley</button>
+    <button class="tab" data-page="board" data-group="record">캐스팅보드 · Board</button>
+    <button class="tab tab-hidden" data-page="stats" data-group="stats">통계 · Cast</button>
+    <button class="tab tab-hidden" data-page="roles" data-group="stats">배역 · Roles</button>
+    <button class="tab tab-hidden" data-page="interactions" data-group="stats">인터랙션 통계 · Interactions</button>
+    <button class="tab tab-hidden" data-page="pairing" data-group="stats">페어링 · Pairing</button>
+    <button class="tab tab-hidden" data-page="scenes" data-group="stats">장면 풀 · Scenes</button>
+    <button class="tab tab-hidden" data-page="casting" data-group="casting">캐스팅 · Casting</button>
+    <button class="tab tab-hidden" data-page="teams" data-group="casting">팀 관리 · Teams</button>
+    <button class="tab tab-hidden" data-page="review" data-group="casting">시즌 결산 · Review</button>
+    <button class="tab tab-hidden" data-page="performers" data-group="cast">퍼포머 · Performers</button>
+    <button class="tab tab-hidden" data-page="myfaves" data-group="cast">최애 · Faves</button>
+    <button class="tab tab-hidden" data-page="favorites" data-group="cast">색상 · Tags</button>
+    <button class="tab tab-hidden" data-page="data" data-group="data">데이터 · Archive</button>
   </nav>
 
   <div class="page active" id="page-record">
@@ -1374,15 +1398,15 @@ body.app-loading::after { content: '동기화 중 · Loading…'; position: fixe
     <div class="section-rule"><div class="line"></div><div class="ornament">✦</div><div class="line"></div></div>
     <div class="casting-intro">회차를 고르면 그 날의 캐스팅이 배역별 초상 사진으로 펼쳐집니다. 사진을 누르면 배우, 배역명을 누르면 배역 상세가 열립니다.</div>
     <div class="board-controls">
-      <label class="board-pick">
-        <span class="board-pick-label">회차 · Visit</span>
-        <select id="boardVisitSelect"></select>
-      </label>
+      <div id="boardCalendar" class="board-calendar"></div>
       <div class="board-meta" id="boardMeta"></div>
     </div>
     <div class="board-sheet">
       <div class="board-header">
-        <div class="board-sub">PUNCHDRUNK &middot; THE MCKITTRICK HOTEL</div>
+        <div class="board-logo">
+          <div class="board-logo-name">THE M<span class="mc-c">c</span>KITHAN HOTEL</div>
+          <div class="board-logo-est">EST. 1939</div>
+        </div>
         <div class="board-title">Sleep No More</div>
         <div class="board-sub board-sub2">CASTING BOARD</div>
       </div>
@@ -3017,6 +3041,24 @@ function nextSceneId() {
 }
 
 // ============ TABS ============
+// 2단 내비: 상단 그룹 바(.group-tab)로 묶음을 고르면 그 그룹의 탭(.tab)만 노출한다.
+function setActiveGroup(group) {
+  if (!group) return;
+  $$('.group-tab').forEach(g => g.classList.toggle('active', g.dataset.group === group));
+  $$('.tab').forEach(t => t.classList.toggle('tab-hidden', t.dataset.group !== group));
+}
+$$('.group-tab').forEach(gbtn => {
+  gbtn.addEventListener('click', () => {
+    const group = gbtn.dataset.group;
+    setActiveGroup(group);
+    // 현재 활성 탭이 이 그룹에 없으면 그룹의 첫 탭을 자동 선택.
+    const active = document.querySelector('.tab.active');
+    if (!active || active.dataset.group !== group) {
+      const first = document.querySelector('.tab[data-group="' + group + '"]');
+      if (first) first.click();
+    }
+  });
+});
 $$('.tab').forEach(btn => {
   btn.addEventListener('click', () => {
     // Re-clicking the already-active tab: keep it in view but skip the full teardown+re-render.
@@ -3024,6 +3066,7 @@ $$('.tab').forEach(btn => {
     $$('.tab').forEach(t => t.classList.remove('active'));
     $$('.page').forEach(p => p.classList.remove('active'));
     btn.classList.add('active');
+    setActiveGroup(btn.dataset.group); // 탭 직접 클릭 시 상단 그룹 바도 동기화
     btn.scrollIntoView({ inline: 'center', block: 'nearest' });
     $('#page-' + btn.dataset.page).classList.add('active');
     renderActive(btn.dataset.page);
@@ -3044,6 +3087,7 @@ function restoreTabFromHash() {
   $$('.page').forEach(p => p.classList.remove('active'));
   btn.classList.add('active');
   page.classList.add('active');
+  setActiveGroup(btn.dataset.group); // 해시로 진입한 탭이 속한 그룹을 상단 바에 반영
 }
 
 // ============ RECORD ============
@@ -7833,7 +7877,7 @@ function boardNamePair(name) {
   return { ko, en, primary: s };
 }
 
-let boardVisitId = null;
+let boardVisitId = null, boardCalMonth = null, boardCalPickDate = null;
 function boardVisitsSorted() {
   return [...state.visits].filter(v => !v.isLegacy).sort(compareVisitsChronoDesc);
 }
@@ -7842,17 +7886,105 @@ function boardDefaultVisit() {
   if (!vs.length) return null;
   return vs.find(v => v.isWatched) || vs[0];
 }
-function populateBoardVisitSelect() {
-  const sel = $('#boardVisitSelect');
-  if (!sel) return;
-  const numMap = getVisitNumMap();
+// 보드 회차 선택 캘린더 — renderRecordCalendar()와 같은 .cal-* 컴포넌트를 재사용한다.
+// 날 클릭: 그 날 회차 1개면 바로 선택, 2개↑면 날짜 아래 칩으로 고른다.
+function renderBoardCalendar() {
+  const wrap = $('#boardCalendar');
+  if (!wrap) return;
+  const pad = n => String(n).padStart(2, '0');
   const vs = boardVisitsSorted();
-  sel.innerHTML = vs.map(v => {
-    const label = `#${numMap[v.id] || '?'} · ${v.date || '날짜 없음'}${v.matinee ? ' ' + v.matinee : ''}${v.isWatched ? ' · 관극✓' : ''}`;
-    return `<option value="${escapeHtml(v.id)}">${escapeHtml(label)}</option>`;
-  }).join('');
-  if (boardVisitId && vs.some(v => v.id === boardVisitId)) sel.value = boardVisitId;
-  else if (vs.length) boardVisitId = sel.value;
+  const byDate = {};
+  vs.forEach(v => { if (!v.date) return; (byDate[v.date] = byDate[v.date] || []).push(v); });
+  const counts = {};
+  Object.keys(byDate).forEach(d => { counts[d] = byDate[d].length; });
+  const numMap = getVisitNumMap();
+
+  const curVisit = boardVisitId ? vs.find(v => v.id === boardVisitId) : null;
+  const selDate = curVisit ? curVisit.date : null;
+
+  if (!boardCalMonth) {
+    const base = selDate || Object.keys(counts).sort().pop();
+    const d = base ? new Date(base + 'T00:00:00') : new Date();
+    boardCalMonth = { y: d.getFullYear(), m: d.getMonth() };
+  }
+  const { y, m } = boardCalMonth;
+  const startDow = new Date(y, m, 1).getDay();
+  const daysInMonth = new Date(y, m + 1, 0).getDate();
+  const now = new Date();
+  const todayStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  const monthPrefix = `${y}-${pad(m + 1)}`;
+  const monthCount = Object.entries(counts).filter(([d]) => d.startsWith(monthPrefix)).reduce((s, [, c]) => s + c, 0);
+
+  let cells = '';
+  for (let i = 0; i < startDow; i++) cells += '<div class="cal-cell cal-empty"></div>';
+  for (let day = 1; day <= daysInMonth; day++) {
+    const ds = `${monthPrefix}-${pad(day)}`;
+    const c = counts[ds] || 0;
+    const dow = (startDow + day - 1) % 7;
+    const cls = ['cal-cell'];
+    if (c > 0) cls.push('cal-has');
+    if (ds === todayStr) cls.push('cal-today');
+    if (ds === selDate) cls.push('cal-sel');
+    if (ds === boardCalPickDate) cls.push('cal-sel');
+    if (dow === 0) cls.push('cal-sun');
+    if (dow === 6) cls.push('cal-sat');
+    cells += `<div class="${cls.join(' ')}"${c > 0 ? ` data-board-day="${ds}" style="cursor:pointer;"` : ''}>`
+      + `<span class="cal-dnum">${day}</span>${c > 0 ? `<span class="cal-dot">${c}</span>` : ''}</div>`;
+  }
+  const wd = ['일', '월', '화', '수', '목', '금', '토'];
+
+  let chipRow = '';
+  if (boardCalPickDate && byDate[boardCalPickDate] && byDate[boardCalPickDate].length > 1) {
+    const list = [...byDate[boardCalPickDate]].sort(compareVisitsChrono);
+    chipRow = `<div class="rec-cal-chips"><span class="rec-cal-chips-label">${boardCalPickDate} · 회차 선택</span>`
+      + list.map(v => {
+          const active = v.id === boardVisitId ? ' active' : '';
+          const label = `#${numMap[v.id] || '?'}${v.matinee ? ' ' + v.matinee : ''}${v.isWatched ? ' ✓' : ''}`;
+          return `<button type="button" class="rec-cal-chip${active}" data-board-vid="${escapeHtml(v.id)}">${escapeHtml(label)}</button>`;
+        }).join('')
+      + `</div>`;
+  }
+
+  wrap.innerHTML = `
+    <div class="cal-head">
+      <button class="mini-btn cal-nav" data-board-nav="-1">◀</button>
+      <div class="cal-title">${y}년 ${m + 1}월 <span class="cal-mcount">· 회차 ${monthCount}</span></div>
+      <button class="mini-btn cal-nav" data-board-nav="1">▶</button>
+      <button class="mini-btn cal-nav" data-board-nav="today">오늘</button>
+    </div>
+    <div class="cal-grid cal-weekdays">${wd.map((w, i) => `<div class="cal-wd${i === 0 ? ' cal-sun' : ''}${i === 6 ? ' cal-sat' : ''}">${w}</div>`).join('')}</div>
+    <div class="cal-grid">${cells}</div>
+    ${chipRow}`;
+
+  wrap.querySelectorAll('[data-board-nav]').forEach(b => b.addEventListener('click', () => {
+    const val = b.dataset.boardNav;
+    if (val === 'today') { const d = new Date(); boardCalMonth = { y: d.getFullYear(), m: d.getMonth() }; }
+    else {
+      let nm = m + parseInt(val, 10), ny = y;
+      if (nm < 0) { nm = 11; ny--; }
+      if (nm > 11) { nm = 0; ny++; }
+      boardCalMonth = { y: ny, m: nm };
+    }
+    renderBoardCalendar();
+  }));
+
+  wrap.querySelectorAll('[data-board-day]').forEach(cell => cell.addEventListener('click', () => {
+    const ds = cell.dataset.boardDay;
+    const list = byDate[ds] || [];
+    if (list.length === 1) {
+      boardCalPickDate = null;
+      boardVisitId = list[0].id;
+      renderCastingBoard();
+    } else if (list.length > 1) {
+      boardCalPickDate = (boardCalPickDate === ds) ? null : ds;
+      renderBoardCalendar();
+    }
+  }));
+
+  wrap.querySelectorAll('[data-board-vid]').forEach(b => b.addEventListener('click', () => {
+    boardVisitId = b.dataset.boardVid;
+    renderCastingBoard();
+  }));
 }
 function boardRoleCardHtml(role, castVal) {
   const actors = castingActors(castVal); // → / X / 분리, (공백) 센티넬 제외
@@ -7890,12 +8022,7 @@ function renderCastingBoard() {
     const d = boardDefaultVisit();
     boardVisitId = d ? d.id : null;
   }
-  populateBoardVisitSelect();
-  const sel = $('#boardVisitSelect');
-  if (sel && !sel.dataset.bound) {
-    sel.dataset.bound = '1';
-    sel.addEventListener('change', () => { boardVisitId = sel.value; renderCastingBoard(); });
-  }
+  renderBoardCalendar();
   const visit = vs.find(v => v.id === boardVisitId) || null;
   const metaEl = $('#boardMeta');
   if (metaEl) {
@@ -7911,8 +8038,9 @@ function renderCastingBoard() {
   const casting = visit.casting || {};
   stage.innerHTML = BOARD_FACTIONS.map(f => {
     const cards = f.roles.map(r => boardRoleCardHtml(r, casting[r.key])).join('');
+    const n = f.roles.length; // 하우스 너비를 역할 수에 비례시켜 행을 꽉 채운다(justified)
     return `
-      <section class="board-faction">
+      <section class="board-faction" style="flex: ${n} 1 0; min-width: ${n * 122}px;">
         <div class="board-faction-head">
           <span class="bf-line"></span>
           <span class="bf-titles"><span class="bf-kr">${escapeHtml(f.kr)}</span><span class="bf-en">${escapeHtml(f.en)}</span></span>
