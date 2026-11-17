@@ -314,6 +314,11 @@ body.role-guest .guest-readonly-note { display: block; }
 body.app-loading nav, body.app-loading #saveVisit { pointer-events: none; opacity: 0.45; }
 body.app-loading::after { content: '동기화 중 · Loading…'; position: fixed; top: 0; left: 0; right: 0; z-index: 9999; padding: 4px 0; text-align: center; background: var(--blood); color: var(--ink); font-family: var(--mono); font-size: 10px; letter-spacing: 0.22em; text-transform: uppercase; }
 .team-blue { background: var(--team-blue-tint); color: var(--team-blue); border: 1px solid var(--team-blue-border); padding: 1px 6px; border-radius: 2px; font-family: var(--mono); font-size: 8px; letter-spacing: 0.15em; text-transform: uppercase; }
+/* 회차 탭 — 그 날의 팀 성향(BLUE/PINK DAY) 작은 박스 */
+.team-day-box { display: inline-block; vertical-align: middle; margin-left: 8px; padding: 1px 7px; border-radius: 2px; font-family: var(--mono); font-size: 8px; letter-spacing: 0.15em; text-transform: uppercase; white-space: nowrap; }
+.team-day-blue { background: var(--team-blue-tint); color: var(--team-blue); border: 1px solid var(--team-blue-border); }
+.team-day-pink { background: var(--team-pink-tint); color: var(--team-pink); border: 1px solid var(--team-pink-border); }
+.team-day-mixed { background: rgba(184,155,94,0.08); color: var(--gold); border: 1px solid var(--gold-dim); }
 .avail-mark { font-family: var(--mono); font-size: 8px; letter-spacing: 0.1em; color: var(--ink-faint); margin-left: 4px; }
 .avail-checkedout { color: var(--avail-checkedout); }
 .avail-retired { color: var(--ink-faint); text-decoration: line-through; }
@@ -798,6 +803,13 @@ body.app-loading::after { content: '동기화 중 · Loading…'; position: fixe
 .ba-en { font-family: var(--mono); font-size: 8px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--gold-dim); line-height: 1.3; }
 .ba-empty { font-family: var(--mono); font-size: 8px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--rule); }
 .board-actor-extra { font-family: var(--mono); font-size: 8px; letter-spacing: 0.08em; color: var(--ink-faint); margin-top: 2px; }
+/* 캐스팅보드 교체 투입(→) 배우 썸네일 — 대표 초상 아래 작은 사진으로 */
+.board-portraits { display: block; width: 100%; }
+.board-portrait-subs { display: flex; flex-wrap: wrap; gap: 4px 5px; justify-content: center; align-items: center; margin-top: 6px; }
+.bps-item { display: inline-flex; align-items: center; gap: 3px; }
+.bps-arrow { font-family: var(--mono); font-size: 11px; color: var(--blood-bright); line-height: 1; }
+.board-portrait.board-portrait-sub { width: 50px; aspect-ratio: 4 / 5; box-shadow: inset 0 0 0 1px rgba(10,8,6,0.85), 0 3px 10px rgba(0,0,0,0.5); }
+.board-portrait.board-portrait-sub .avatar-fill { font-size: 18px; }
 
 @media (max-width: 760px) {
   /* 좁은 화면: 하우스를 한 줄 전체로 펴서 포트레이트가 과하게 작아지지 않게 */
@@ -966,6 +978,12 @@ body.app-loading::after { content: '동기화 중 · Loading…'; position: fixe
         <option value="count">장면 많은 순</option>
       </select>
       <select id="historyMonth"><option value="all">전체 기간</option></select>
+      <select id="historyTeamDay" title="그 날의 팀 성향(블루/핑크/혼합)으로 필터">
+        <option value="all">전체</option>
+        <option value="blue">BLUE DAY</option>
+        <option value="pink">PINK DAY</option>
+        <option value="mixed">혼합 · MIXED</option>
+      </select>
       <button class="mini-btn" id="addNewPerf" style="padding: 8px 16px;">+ 새 공연 회차</button>
     </div>
 
@@ -2250,9 +2268,10 @@ function showToast(msg) {
   setTimeout(() => t.classList.remove('show'), 2200);
 }
 function getWatchedCount() {
-  // Full-show watches (excludes Manderley Experience views, which are 3rd-loop-only)
+  // Full-show watches (excludes Manderley Experience views, which are 3rd-loop-only).
+  // Legacy(엑셀 누적 시드)는 별도 관리 대상이라 관극 회차 합산에서 제외한다(유저 요청 2026-11-17).
   return state.visits.reduce((sum, v) => {
-    if (v.isLegacy) return sum + (v.legacyViewCount || 0);
+    if (v.isLegacy) return sum;
     return sum + ((v.isWatched && !v.watchedAsManderley) ? 1 : 0);
   }, 0);
 }
@@ -4062,6 +4081,7 @@ const HISTORY_PAGE_SIZE = 50;
 let calMonth = null;        // {y, m(0-based)} currently viewed month, null=auto
 let calFilterDate = null;   // 'YYYY-MM-DD' active day filter, or null
 let historyMonthFilter = 'all'; // 'YYYY-MM' month filter for history, or 'all'
+let historyTeamDay = 'all'; // 팀데이 필터: 'all' | 'blue' | 'pink' | 'mixed'
 let recCalMonth = null;      // Record 탭 회차선택 캘린더가 보는 달 {y,m(0-based)}, null=자동
 let recCalPickDate = null;   // 하루에 회차가 여러 개일 때 펼쳐 고르는 날짜 YYYY-MM-DD
 
@@ -4818,23 +4838,65 @@ function renderVisitCalendar() {
   if (clr) clr.addEventListener('click', () => { calFilterDate = null; historyPage = 0; renderHistory(); });
 }
 
+// 한 회차의 팀 성향 판정 — 그 날 캐스팅된 배우들의 날짜별 팀(Pink/Blue)을 집계해
+// 더 많은 쪽을 그 회차의 '데이'로 본다. 동수(>0)는 혼합, 팀 정보 없으면 null.
+function visitTeamDay(v) {
+  if (!v || v.isLegacy || !v.casting) return null;
+  let pink = 0, blue = 0;
+  for (const [role, val] of Object.entries(v.casting)) {
+    for (const a of castingActors(val)) {
+      const t = teamForDate(role, a, v.date);
+      if (t === 'Pink') pink++;
+      else if (t === 'Blue') blue++;
+    }
+  }
+  if (!pink && !blue) return null;
+  if (blue > pink) return { team: 'blue', label: 'BLUE DAY', pink, blue };
+  if (pink > blue) return { team: 'pink', label: 'PINK DAY', pink, blue };
+  return { team: 'mixed', label: '혼합 · MIXED', pink, blue };
+}
+function teamDayBadgeHtml(v) {
+  const d = visitTeamDay(v);
+  if (!d) return '';
+  const cls = d.team === 'blue' ? 'team-day-blue' : d.team === 'pink' ? 'team-day-pink' : 'team-day-mixed';
+  return `<span class="team-day-box ${cls}" title="Blue ${d.blue} · Pink ${d.pink}">${d.label}</span>`;
+}
+// 회차 탭 → 캐스팅보드 바로가기. 그 회차를 보드에 선택해두고 board 탭으로 전환한다.
+function openBoardForVisit(vid) {
+  boardVisitId = vid;
+  boardCalPickDate = null;
+  boardCalMonth = null; // 선택 회차의 월로 캘린더가 다시 맞춰지도록
+  const tabBtn = document.querySelector('.tab[data-page="board"]');
+  if (tabBtn) tabBtn.click(); // setActiveGroup + renderActive('board') 까지 처리됨
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
 function renderHistory() {
   renderVisitCalendar();
   historyMonthFilter = fillMonthSelect($('#historyMonth'), historyMonthFilter);
   const term = $('#historySearch').value.toLowerCase().trim();
   const sort = $('#historySort').value;
+  const teamDaySel = $('#historyTeamDay');
+  if (teamDaySel) teamDaySel.value = historyTeamDay; // var를 소스로 삼아 select 동기화
   // The Manderley Experience is a flag on a regular performance, not a separate visit,
   // so these visits remain in the normal Visits list (shown with a small marker).
   let visits = [...state.visits];
 
+  // Legacy(엑셀 누적 시드)는 개별 회차가 아니라 별도 관리 대상 → 회차 리스트에서 제외(유저 요청 2026-11-17).
+  visits = visits.filter(v => !v.isLegacy);
+
   // Scope filter
   if (historyScope === 'watched') {
-    visits = visits.filter(v => v.isWatched || v.isLegacy);
+    visits = visits.filter(v => v.isWatched);
   }
 
   // Calendar day filter (click a day in the calendar to filter to that date)
   if (calFilterDate) visits = visits.filter(v => v.date === calFilterDate);
   else if (historyMonthFilter !== 'all') visits = visits.filter(v => (v.date || '').startsWith(historyMonthFilter));
+
+  // 팀데이 필터 — 그 날의 팀 성향(blue/pink/mixed). 팀정보 없는 회차는 특정 필터 시 제외.
+  if (historyTeamDay !== 'all') {
+    visits = visits.filter(v => { const d = visitTeamDay(v); return d && d.team === historyTeamDay; });
+  }
 
   // #N = chronological performance order (used by number search + card badges)
   const numMap = getVisitNumMap();
@@ -4867,7 +4929,7 @@ function renderHistory() {
 
   const list = $('#historyList');
   if (visits.length === 0) {
-    const hasFilter = $('#historySearch').value || historyScope !== 'watched' || calFilterDate || historyMonthFilter !== 'all';
+    const hasFilter = $('#historySearch').value || historyScope !== 'watched' || calFilterDate || historyMonthFilter !== 'all' || historyTeamDay !== 'all';
     if (hasFilter) {
       list.innerHTML = `
         <div style="color: var(--ink-faint); padding: 40px; font-style: italic; text-align: center;">
@@ -4892,6 +4954,7 @@ function renderHistory() {
       $('#historySearch').value = '';
       calFilterDate = null;
       historyMonthFilter = 'all';
+      historyTeamDay = 'all';
       historyScope = 'watched';
       historyPage = 0;
       document.querySelectorAll('#historyScopeToggle button').forEach(b => b.classList.toggle('active', b.dataset.scope === 'watched'));
@@ -5070,9 +5133,13 @@ function renderHistory() {
       const entryEditBtn = isEntryEditable
         ? `<button class="mini-btn" data-stop-legacy="${v.id}">편집 종료</button>`
         : (v.entries && v.entries.length > 0 ? `<button class="mini-btn" data-edit-legacy="${v.id}">인카운터 편집</button>` : '');
+      const boardBtn = castingEntries.length
+        ? `<button class="mini-btn" data-board-view="${v.id}" title="이 회차 캐스팅을 보드(사진)로 보기">캐스팅보드 보기</button>`
+        : '';
       actions = `<div class="visit-actions">
         ${watchBtn}
         ${mandBtn}
+        ${boardBtn}
         ${editBtn}
         ${metaBtn}
         ${entryEditBtn}
@@ -5108,7 +5175,7 @@ function renderHistory() {
           <div class="visit-header-left">
             <span class="visit-num">${numLabel}</span>
             <div>
-              <div class="visit-date">${escapeHtml(dateLabel)}${watchedBadge}${manderleyBadge}${shareBadgeHtml(v)}${watchlistBadgeHtml(v)}</div>
+              <div class="visit-date">${escapeHtml(dateLabel)}${watchedBadge}${manderleyBadge}${shareBadgeHtml(v)}${watchlistBadgeHtml(v)}${teamDayBadgeHtml(v)}</div>
               <div class="visit-meta">${v.entries.length} encounters${castingEntries.length ? ' · ' + castingEntries.length + ' cast' : ''}${v.isLegacy ? ' · ' + (v.legacyViewCount || 0) + ' visits' : ''}</div>
             </div>
           </div>
@@ -5167,6 +5234,7 @@ function renderHistory() {
     h.addEventListener('click', () => { $('#vbody-' + h.dataset.id).classList.toggle('open'); });
   });
   $$('[data-rate-vid]').forEach(b => b.addEventListener('click', (e) => { e.stopPropagation(); openRatingEditor(b.dataset.rateVid); }));
+  $$('[data-board-view]').forEach(b => b.addEventListener('click', (e) => { e.stopPropagation(); openBoardForVisit(b.dataset.boardView); }));
   $$('[data-delete]').forEach(b => {
     b.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -5594,6 +5662,11 @@ $('#historyMonth') && $('#historyMonth').addEventListener('change', () => {
   historyPage = 0;
   renderHistory();
 });
+$('#historyTeamDay') && $('#historyTeamDay').addEventListener('change', () => {
+  historyTeamDay = $('#historyTeamDay').value;
+  historyPage = 0;
+  renderHistory();
+});
 $('#calToggle') && $('#calToggle').addEventListener('click', () => {
   const el = $('#visitCalendar');
   const open = el.style.display === 'none';
@@ -5866,7 +5939,7 @@ function renderPerformerStats() {
   const sort = $('#statsSort').value;
   const stats = getPerformerStats(statsScope);
   const totalPerf = state.visits.filter(v => !v.isLegacy && inStatsPeriod(v) && (statsScope !== 'watched' || v.isWatched)).length;
-  // 표시용: '내 관극' scope + 전체 기간이면 홈 카운터(getWatchedCount)와 같은 정의로 통일(맨덜리 제외, legacy 포함).
+  // 표시용: '내 관극' scope + 전체 기간이면 홈 카운터(getWatchedCount)와 같은 정의로 통일(맨덜리·legacy 제외).
   // 행별 출연률 분모는 totalPerf 그대로 유지 → 확률 왜곡 없음.
   const totalPerfDisplay = (statsScope === 'watched' && periodIsAll(statsPeriod)) ? getWatchedCount() : totalPerf;
 
@@ -7993,8 +8066,16 @@ function boardRoleCardHtml(role, castVal) {
   let portrait, nameHtml;
   if (primary) {
     const pair = boardNamePair(primary);
-    portrait = `<span class="board-portrait" data-board-actor="${escapeHtml(primary)}" title="${escapeHtml(primary)}">${performerAvatarInner(primary)}</span>`;
     const extras = actors.slice(1);
+    const mainPortrait = `<span class="board-portrait" data-board-actor="${escapeHtml(primary)}" title="${escapeHtml(primary)}">${performerAvatarInner(primary)}</span>`;
+    // 중간 교체가 있으면 교체 투입 배우도 작은 썸네일 사진으로(→ 뒤에 나열) — 클릭 시 배우 상세.
+    const subPortraits = extras.length
+      ? `<span class="board-portrait-subs">${extras.map(a =>
+          `<span class="bps-item"><span class="bps-arrow">→</span>`
+          + `<span class="board-portrait board-portrait-sub" data-board-actor="${escapeHtml(a)}" title="교체 투입 · ${escapeHtml(a)}">${performerAvatarInner(a)}</span></span>`
+        ).join('')}</span>`
+      : '';
+    portrait = `<span class="board-portraits">${mainPortrait}${subPortraits}</span>`;
     const extraHtml = extras.length
       ? `<span class="board-actor-extra">→ ${extras.map(a => { const p = boardNamePair(a); return escapeHtml(p.ko || p.en || p.primary); }).join(' · ')}</span>`
       : '';
@@ -9903,29 +9984,33 @@ function renderInsights() {
     </div>`;
 }
 
-function renderActive(page) {
-  if (page === 'record') { renderScenes(); renderCastingInputs(); populateVisitSelector(); renderInsights(); }
-  else if (page === 'history') renderHistory();
-  else if (page === 'manderley') renderManderley();
-  else if (page === 'stats') renderStats();
-  else if (page === 'roles') renderRoles();
-  else if (page === 'interactions') renderInteractions();
-  else if (page === 'casting') {
+// 페이지별 렌더러 dispatch map (if-else 체인 대체). 각 탭의 data-page → 렌더 함수.
+const PAGE_RENDERERS = {
+  record: () => { renderScenes(); renderCastingInputs(); populateVisitSelector(); renderInsights(); },
+  history: () => renderHistory(),
+  manderley: () => renderManderley(),
+  stats: () => renderStats(),
+  roles: () => renderRoles(),
+  interactions: () => renderInteractions(),
+  casting: () => {
     const activeMode = $$('.casting-mode-toggle button').find(b => b.classList.contains('active'));
     const mode = activeMode ? activeMode.dataset.mode : 'view';
-    if (mode === 'view') renderCastingTracker();
-    else if (mode === 'bulk') renderBulkEditor();
+    if (mode === 'bulk') renderBulkEditor();
     else if (mode === 'pool') renderPoolEditor();
-  }
-  else if (page === 'teams') renderTeams();
-  else if (page === 'review') renderReview();
-  else if (page === 'scenes') renderScenePool();
-  else if (page === 'pairing') populatePairingDropdowns();
-  else if (page === 'performers') renderPerformers();
-  else if (page === 'favorites') renderActorTags();
-  else if (page === 'myfaves') renderMyFaves();
-  else if (page === 'board') renderCastingBoard();
-  else if (page === 'data') { renderBulkWatch(); refreshMergeTool(); }
+    else renderCastingTracker();
+  },
+  teams: () => renderTeams(),
+  review: () => renderReview(),
+  scenes: () => renderScenePool(),
+  pairing: () => populatePairingDropdowns(),
+  performers: () => renderPerformers(),
+  favorites: () => renderActorTags(),
+  myfaves: () => renderMyFaves(),
+  board: () => renderCastingBoard(),
+  data: () => { renderBulkWatch(); refreshMergeTool(); },
+};
+function renderActive(page) {
+  (PAGE_RENDERERS[page] || (() => {}))();
 }
 
 // ============ AUTH + BOOTSTRAP ============
