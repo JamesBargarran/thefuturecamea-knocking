@@ -1,0 +1,17 @@
+{
+  "name": "McKithan Hotel — Find My Records",
+  "short_name": "McKithan",
+  "description": "McKithan Hotel 관극 기록 — 캐스팅 트래커",
+  "lang": "ko",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#14110d",
+  "theme_color": "#14110d",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
