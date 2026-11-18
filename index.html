@@ -19,7 +19,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400;1,500&family=JetBrains+Mono:wght@300;400;500;600&family=Noto+Serif+KR:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<!-- XLSX(SheetJS)는 엑셀 가져오기/내보내기에서만 사용 → 첫 화면 렌더를 막지 않도록
+     여기서의 동기 로드를 제거하고 ensureXLSX()로 필요할 때 1회 지연 로드한다. -->
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -8527,10 +8528,29 @@ function openRoleModal(sceneId) {
   $('#modal').classList.add('open');
 }
 
+// --- XLSX 지연 로더: 엑셀 기능이 처음 필요할 때 1회만 로드(+부팅 후 idle 예열) ---
+// 과거엔 <head>에서 ~900KB XLSX를 동기 로드해 매 실행마다 첫 화면을 막았다.
+let _xlsxPromise = null;
+function ensureXLSX() {
+  if (window.XLSX) return Promise.resolve(window.XLSX);
+  if (_xlsxPromise) return _xlsxPromise;
+  _xlsxPromise = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+    s.async = true;
+    s.onload = () => resolve(window.XLSX);
+    s.onerror = () => { _xlsxPromise = null; reject(new Error('XLSX load failed')); };
+    document.head.appendChild(s);
+  });
+  return _xlsxPromise;
+}
+// 부팅 크리티컬 패스 밖(idle)에서 미리 예열해, 엑셀 버튼 클릭 시 즉시 반응하도록 한다.
+(window.requestIdleCallback || function (f) { return setTimeout(f, 2500); })(function () { ensureXLSX().catch(function () {}); });
+
 // ============ EXCEL TEMPLATES & IMPORT ============
 
-function downloadCastingTemplate() {
-  if (!window.XLSX) { showToast('엑셀 모듈을 불러오지 못했습니다 — 네트워크 확인 후 새로고침'); return; }
+async function downloadCastingTemplate() {
+  try { await ensureXLSX(); } catch (_e) { showToast('엑셀 모듈을 불러오지 못했습니다 — 네트워크 확인 후 다시 시도'); return; }
   const headers = ['date', 'matinee', 'visit_num', 'notes', ...state.characters.map(c => c.name)];
   const chronological = [...state.visits]
     .filter(v => !v.isLegacy)
@@ -8567,8 +8587,8 @@ function downloadCastingTemplate() {
   showToast('캐스팅 템플릿 다운로드 완료');
 }
 
-function downloadEncountersTemplate() {
-  if (!window.XLSX) { showToast('엑셀 모듈을 불러오지 못했습니다 — 네트워크 확인 후 새로고침'); return; }
+async function downloadEncountersTemplate() {
+  try { await ensureXLSX(); } catch (_e) { showToast('엑셀 모듈을 불러오지 못했습니다 — 네트워크 확인 후 다시 시도'); return; }
   // Each row = one encounter: date, matinee, visit_num, notes, type, role, actor
   const headers = ['date', 'matinee', 'visit_num', 'notes', 'type', 'role', 'actor'];
   const chronological = [...state.visits]
@@ -8669,8 +8689,8 @@ function matchImportVisit(date, matinee, perfNum) {
 
 // Helper: find or create visit by date+num
 
-function importCasting(file) {
-  if (!window.XLSX) { showToast('엑셀 모듈을 불러오지 못했습니다 — 네트워크 확인 후 새로고침'); return; }
+async function importCasting(file) {
+  try { await ensureXLSX(); } catch (_e) { showToast('엑셀 모듈을 불러오지 못했습니다 — 네트워크 확인 후 다시 시도'); return; }
   parseExcelFile(file).then(wb => {
     const sheet = wb.Sheets['Casting'] || wb.Sheets[wb.SheetNames[0]];
     if (!sheet) { showToast('Casting 시트를 찾을 수 없습니다'); return; }
@@ -8809,8 +8829,8 @@ function importCasting(file) {
   });
 }
 
-function importEncounters(file) {
-  if (!window.XLSX) { showToast('엑셀 모듈을 불러오지 못했습니다 — 네트워크 확인 후 새로고침'); return; }
+async function importEncounters(file) {
+  try { await ensureXLSX(); } catch (_e) { showToast('엑셀 모듈을 불러오지 못했습니다 — 네트워크 확인 후 다시 시도'); return; }
   parseExcelFile(file).then(wb => {
     const sheet = wb.Sheets['Encounters'] || wb.Sheets[wb.SheetNames[0]];
     if (!sheet) { showToast('Encounters 시트를 찾을 수 없습니다'); return; }
@@ -9750,8 +9770,8 @@ function wireBwList() {
   }));
 }
 
-function exportBulkWatchExcel() {
-  if (typeof XLSX === 'undefined') { showToast('엑셀 모듈 로드 실패 — 네트워크 확인'); return; }
+async function exportBulkWatchExcel() {
+  try { await ensureXLSX(); } catch (_e) { showToast('엑셀 모듈 로드 실패 — 네트워크 확인'); return; }
   const numMap = getVisitNumMap();
   const term = ($('#bwSearch') ? $('#bwSearch').value : '').toLowerCase().trim();
   const onlyUn = $('#bwOnlyUnwatched') && $('#bwOnlyUnwatched').checked;
@@ -9783,8 +9803,8 @@ function exportBulkWatchExcel() {
 }
 
 // 레거시 데이터(회차별로 분리되지 않은 누적 관극) → 장면×배우×횟수 엑셀
-function exportLegacyExcel() {
-  if (typeof XLSX === 'undefined') { showToast('엑셀 모듈 로드 실패 — 네트워크 확인'); return; }
+async function exportLegacyExcel() {
+  try { await ensureXLSX(); } catch (_e) { showToast('엑셀 모듈 로드 실패 — 네트워크 확인'); return; }
   const typeOrder = { '1:1': 0, '인터랙션': 1, '워크아웃': 2 };
   const rows = [];
   (state.scenes || []).forEach(s => {
@@ -9831,8 +9851,8 @@ function renderBulkWatchExcel() {
   $('#bwExcelFile').addEventListener('change', (e) => { if (e.target.files[0]) { importWatchExcel(e.target.files[0]); e.target.value = ''; } });
 }
 
-function downloadWatchTemplate() {
-  if (typeof XLSX === 'undefined') { showToast('엑셀 모듈 로드 실패 — 네트워크 확인'); return; }
+async function downloadWatchTemplate() {
+  try { await ensureXLSX(); } catch (_e) { showToast('엑셀 모듈 로드 실패 — 네트워크 확인'); return; }
   const numMap = getVisitNumMap();
   const visits = state.visits.filter(v => !v.isLegacy).sort(compareVisitsChrono);
   const rows = [['관극', '#', '날짜', '회차', '인카운터 (쉼표로 여러 개)']];
@@ -9851,8 +9871,8 @@ function downloadWatchTemplate() {
   showToast('템플릿 다운로드 — 관극 칸에 O 표시 후 업로드');
 }
 
-function importWatchExcel(file) {
-  if (typeof XLSX === 'undefined') { showToast('엑셀 모듈 로드 실패'); return; }
+async function importWatchExcel(file) {
+  try { await ensureXLSX(); } catch (_e) { showToast('엑셀 모듈 로드 실패 — 네트워크 확인'); return; }
   const reader = new FileReader();
   reader.onload = (ev) => {
     let wb;
